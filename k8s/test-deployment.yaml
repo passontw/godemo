@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-amd64
+  labels:
+    app: test-amd64
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-amd64
+  template:
+    metadata:
+      labels:
+        app: test-amd64
+    spec:
+      containers:
+      - name: test-amd64
+        image: harbor.trevi-dev.cc/cpp_run/test-amd64:latest
+        command: ["/test.sh"] 

@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rocketmq-client
+  labels:
+    app: rocketmq-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rocketmq-client
+  template:
+    metadata:
+      labels:
+        app: rocketmq-client
+    spec:
+      containers:
+      - name: rocketmq-client
+        image: harbor.trevi-dev.cc/cpp_run/rocketmq-client:latest
+        env:
+        - name: ROCKETMQ_NAMESERVER
+          value: "rocketmq-nameserver.rocketmq-system.svc.cluster.local:9876"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        # 客户端不需要健康检查，因为它是一个一次性任务
+        command: ["./client"]
+        args: []
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rocketmq-client-service
+  labels:
+    app: rocketmq-client
+spec:
+  selector:
+    app: rocketmq-client
+  ports:
+  - protocol: TCP
+    port: 8080
+    targetPort: 8080
+  type: ClusterIP 

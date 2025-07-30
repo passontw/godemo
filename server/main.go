@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -254,6 +255,8 @@ func (s *ChatServer) Stop() {
 }
 
 func main() {
+	log.Printf("服务端启动中...")
+
 	// 从环境变量获取配置
 	nameserver := os.Getenv("ROCKETMQ_NAMESERVER")
 	if nameserver == "" {
@@ -265,22 +268,50 @@ func main() {
 		nameserver = "127.0.0.1:9876" // 默认使用本地端口转发
 	}
 
+	log.Printf("使用 nameserver: %s", nameserver)
+
 	groupName := os.Getenv("ROCKETMQ_GROUP")
 	if groupName == "" {
 		groupName = "chat_server_group"
 	}
 
+	log.Printf("使用 group name: %s", groupName)
+
+	// 启动健康检查服务
+	go func() {
+		log.Printf("启动健康检查服务...")
+		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+			log.Printf("收到健康检查请求")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("OK"))
+		})
+		http.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
+			log.Printf("收到就绪检查请求")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("OK"))
+		})
+		log.Printf("健康检查服务启动在端口 8080")
+		if err := http.ListenAndServe(":8080", nil); err != nil {
+			log.Printf("健康检查服务启动失败: %v", err)
+		}
+	}()
+
 	// 创建服务端
+	log.Printf("创建聊天服务端...")
 	server := NewChatServer(nameserver, groupName)
 
 	// 启动服务端
+	log.Printf("启动聊天服务端...")
 	if err := server.Start(); err != nil {
 		log.Fatalf("启动服务端失败: %v", err)
 	}
 
+	log.Printf("服务端启动成功，等待信号...")
+
 	// 模拟发布一些事件
 	go func() {
 		time.Sleep(5 * time.Second)
+		log.Printf("发布测试事件...")
 
 		// 发布用户加入事件
 		server.PublishEvent(ChatMessage{
@@ -304,6 +335,7 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
 
+	log.Printf("收到停止信号，正在关闭服务端...")
 	// 优雅关闭
 	server.Stop()
 }
