@@ -19,7 +19,8 @@
       "Bash(ls:*)",
       "Bash(go build:*)",
       "Bash(docker run:*)",
-      "Bash(kubectl rollout restart:*)"
+      "Bash(kubectl rollout restart:*)",
+      "Bash(rm:*)"
     ],
     "deny": []
   }

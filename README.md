@@ -1,611 +1,410 @@
-# RocketMQ 聊天服务示例
+# RocketMQ Go 示例項目
 
-这个项目演示了如何使用 RocketMQ 实现 Request-Response 和 Publish-Subscribe 两种消息传递模式。
+## 📋 概述
 
-## 项目结构
+本項目演示了如何使用 RocketMQ 實現 Request-Response 和 Publish-Subscribe 模式，並提供了完整的 Docker 鏡像構建和 Kubernetes 部署方案，支持多環境部署和固定 IP 配置。
+
+## 🏗️ 項目結構
 
 ```
 godemo/
-├── server/main.go    # 服务端 - 处理请求和发布事件
-├── client/main.go    # 客户端 - 发送请求和订阅事件
-├── go.mod           # Go 模块文件
-└── README.md        # 项目说明
+├── server/                 # 服務端代碼
+│   └── main.go
+├── client/                 # 客戶端代碼
+│   └── main.go
+├── k8s/                   # Kubernetes 部署文件
+│   ├── server-deployment.yaml
+│   ├── client-deployment.yaml
+│   └── create-topics-job.yaml
+├── Dockerfile.server       # 服務端 Dockerfile
+├── Dockerfile.client       # 客戶端 Dockerfile
+├── Dockerfile.topics       # Topics 創建工具 Dockerfile
+├── build-and-push.sh      # 構建和推送腳本
+├── deploy.sh              # 多環境部署腳本
+
+├── run-local.sh           # 本地測試腳本
+└── go.mod                 # Go 模塊文件
 ```
 
-## 功能特性
+## 🚀 快速開始
 
-### 1. Request-Response 模式
-- **请求主题**: `TG001-chat-service-requests`
-- **响应主题**: `TG001-chat-service-responses`
-- **支持的操作**:
-  - `send_message`: 发送消息
-  - `get_history`: 获取历史记录
-
-### 2. Publish-Subscribe 模式
-- **事件主题**: `TG001-chat-service-events`
-- **支持的事件类型**:
-  - `user_join`: 用户加入
-  - `user_leave`: 用户离开
-  - `message_sent`: 消息发送
-
-## 环境配置
-
-### RocketMQ 连接配置
-根据您提供的服务信息，RocketMQ 配置如下：
-
-```bash
-# NameServer 地址
-ROCKETMQ_NAMESERVER=rocketmq-nameserver.rocketmq-system.svc.cluster.local:9876
-
-# 服务端组名
-ROCKETMQ_GROUP=chat_server_group
-
-# 客户端组名
-ROCKETMQ_GROUP=chat_client_group
-
-# 用户ID
-USER_ID=user_001
-```
-
-### 服务信息
-- **NameServer**: `10.43.98.224:9876`
-- **NodePort**: `30876`
-- **Endpoints**: `10.42.0.183:9876`
-
-## 运行示例
-
-### 1. 安装依赖
+### 1. 安裝依賴
 ```bash
 go mod tidy
 ```
 
-### 2. 启动服务端
-```bash
-# 设置环境变量
-export ROCKETMQ_NAMESERVER="rocketmq-nameserver.rocketmq-system.svc.cluster.local:9876"
-export ROCKETMQ_GROUP="chat_server_group"
+### 2. 運行示例
 
-# 运行服务端
-go run server/main.go
+#### 方法一：使用啟動腳本
+```bash
+# 啟動服務端
+./run.sh server
+
+# 啟動客戶端（在另一個終端）
+./run.sh client
+
+# 或者同時啟動服務端和客戶端
+./run.sh both
 ```
 
-### 3. 启动客户端
+#### 方法二：本地測試環境
 ```bash
-# 设置环境变量
+# 本地運行（需要本地 RocketMQ）
+./run-local.sh localhost:9876
+
+# 連接到遠程 RocketMQ
+./run-local.sh 192.168.1.100:9876
+```
+
+#### 方法三：直接運行
+```bash
+# 啟動服務端
+export ROCKETMQ_NAMESERVER="rocketmq-nameserver.rocketmq-system.svc.cluster.local:9876"
+export ROCKETMQ_GROUP="chat_server_group"
+go run server/main.go
+
+# 啟動客戶端（在另一個終端）
 export ROCKETMQ_NAMESERVER="rocketmq-nameserver.rocketmq-system.svc.cluster.local:9876"
 export ROCKETMQ_GROUP="chat_client_group"
 export USER_ID="user_001"
-
-# 运行客户端
 go run client/main.go
 ```
 
-## 消息传递规范
+### 3. 預期輸出
 
-### Request-Response 模式
-
-#### 请求消息格式
-```json
-{
-  "request_id": "req_1234567890",
-  "user_id": "user_001",
-  "action": "send_message",
-  "data": {
-    "message": "Hello, everyone!",
-    "room_id": "room_001"
-  }
-}
+#### 服務端輸出
+```
+2024/01/01 12:00:00 聊天服務端已啟動，監聽請求和事件...
+2024/01/01 12:00:05 事件已發布: SendResult [MessageId: xxx, QueueId: 0, QueueOffset: 0]
+2024/01/01 12:00:05 事件已發布: SendResult [MessageId: xxx, QueueId: 0, QueueOffset: 1]
+2024/01/01 12:00:10 收到請求消息: {"request_id":"req_xxx","user_id":"user_001","action":"send_message",...}
+2024/01/01 12:00:10 處理請求: req_xxx, 用戶: user_001, 動作: send_message
+2024/01/01 12:00:10 消息已發送: map[message_id:msg_xxx status:sent]
+2024/01/01 12:00:10 響應已發送: SendResult [MessageId: xxx, QueueId: 0, QueueOffset: 2]
 ```
 
-#### 响应消息格式
-```json
-{
-  "request_id": "req_1234567890",
-  "success": true,
-  "data": {
-    "message_id": "msg_1234567890",
-    "status": "sent"
-  },
-  "error": null
-}
+#### 客戶端輸出
+```
+2024/01/01 12:00:00 聊天客戶端已啟動，用戶: user_001
+2024/01/01 12:00:02 發布用戶加入事件...
+2024/01/01 12:00:02 事件已發布: SendResult [MessageId: xxx, QueueId: 0, QueueOffset: 0]
+2024/01/01 12:00:04 發送消息請求...
+2024/01/01 12:00:04 請求已發送: SendResult [MessageId: xxx, QueueId: 0, QueueOffset: 1]
+2024/01/01 12:00:04 收到響應消息: {"request_id":"req_xxx","success":true,"data":{...}}
+2024/01/01 12:00:04 收到響應: &{RequestID:req_xxx Success:true Data:map[...] Error:}
 ```
 
-### Publish-Subscribe 模式
+## 🐳 Docker 鏡像構建
 
-#### 事件消息格式
-```json
-{
-  "user_id": "user_001",
-  "message": "Hello, everyone!",
-  "timestamp": "2024-01-01T12:00:00Z",
-  "type": "message_sent"
-}
-```
+### 1. 構建和推送鏡像
 
-## 消息属性
-
-### 请求消息属性
-- `request_id`: 请求ID
-- `user_id`: 用户ID
-- `action`: 操作类型
-
-### 响应消息属性
-- `request_id`: 对应的请求ID
-- `response_type`: 响应类型
-
-### 事件消息属性
-- `event_type`: 事件类型
-- `user_id`: 用户ID
-
-## 错误处理
-
-### 超时处理
-- 请求响应超时时间: 10秒
-- 自动清理超时的请求通道
-
-### 错误分类
-- **业务错误**: 余额不足、用户状态异常等
-- **系统错误**: 网络超时、服务不可用等
-
-## 监控和日志
-
-### 日志输出
-- 请求/响应消息处理
-- 事件消息处理
-- 错误信息记录
-
-### 关键指标
-- 消息发送成功率
-- 响应时间
-- 错误率
-
-## 扩展功能
-
-### 1. 添加新的操作类型
-在 `ChatRequest.Action` 中添加新的操作类型，并在 `processRequest` 方法中实现相应的处理逻辑。
-
-### 2. 添加新的事件类型
-在 `ChatMessage.Type` 中添加新的事件类型，并在 `processEvent` 方法中实现相应的处理逻辑。
-
-### 3. 实现消息持久化
-可以添加数据库操作来持久化消息，实现消息的存储和查询功能。
-
-### 4. 添加消息过滤
-使用 RocketMQ 的 Tag 功能来实现消息过滤，提高消息处理的效率。
-
-## 注意事项
-
-1. **连接配置**: 确保 RocketMQ NameServer 地址正确
-2. **组名唯一性**: 确保生产者和消费者组名在集群中唯一
-3. **错误处理**: 实现适当的错误处理和重试机制
-4. **资源清理**: 确保在程序退出时正确关闭连接
-
-## Kubernetes 部署
-
-### Docker 鏡像構建
-
-#### 服務端 Dockerfile
-```dockerfile
-# 使用官方 Go 镜像作为构建环境
-FROM golang:1.24-alpine AS builder
-
-# 设置工作目录
-WORKDIR /app
-
-# 复制 go mod 文件
-COPY go.mod go.sum ./
-
-# 下载依赖
-RUN go mod download
-
-# 复制源代码
-COPY server/ ./server/
-
-# 构建服务端
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -o /app/myserver ./server/main.go
-
-# 使用轻量级的 alpine 镜像作为运行环境
-FROM alpine:latest
-
-# 安装 ca-certificates，用于 HTTPS 请求
-RUN apk --no-cache add ca-certificates
-
-WORKDIR /root/
-
-# 从构建阶段复制二进制文件
-COPY --from=builder /app/myserver ./server
-
-# 设置执行权限
-RUN chmod +x ./server
-
-# 暴露端口（如果需要的话）
-EXPOSE 8080
-
-# 运行服务端
-CMD ["./server"]
-```
-
-#### 客戶端 Dockerfile
-```dockerfile
-# 使用官方 Go 镜像作为构建环境
-FROM golang:1.24-alpine AS builder
-
-# 设置工作目录
-WORKDIR /app
-
-# 复制 go mod 文件
-COPY go.mod go.sum ./
-
-# 下载依赖
-RUN go mod download
-
-# 复制源代码
-COPY client/ ./client/
-
-# 构建客户端
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -o /app/myclient ./client/main.go
-
-# 使用轻量级的 alpine 镜像作为运行环境
-FROM alpine:latest
-
-# 安装 ca-certificates，用于 HTTPS 请求
-RUN apk --no-cache add ca-certificates
-
-WORKDIR /root/
-
-# 从构建阶段复制二进制文件
-COPY --from=builder /app/myclient ./client
-
-# 设置执行权限
-RUN chmod +x ./client
-
-# 运行客户端
-CMD ["./client"]
-```
-
-### Kubernetes 部署文件
-
-#### 服務端部署（server-deployment.yaml）
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: rocketmq-server
-  labels:
-    app: rocketmq-server
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: rocketmq-server
-  template:
-    metadata:
-      labels:
-        app: rocketmq-server
-    spec:
-      containers:
-      - name: rocketmq-server
-        image: harbor.trevi-dev.cc/cpp_run/rocketmq-server:v4
-        env:
-        - name: ROCKETMQ_NAMESERVER
-          value: "10.43.171.188:9876"
-        - name: POD_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
-        - name: POD_NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
-        ports:
-        - containerPort: 8080
-        resources:
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
-            memory: "256Mi"
-            cpu: "200m"
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /ready
-            port: 8080
-          initialDelaySeconds: 5
-          periodSeconds: 5
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: rocketmq-server-service
-  labels:
-    app: rocketmq-server
-spec:
-  selector:
-    app: rocketmq-server
-  ports:
-  - protocol: TCP
-    port: 8080
-    targetPort: 8080
-  type: ClusterIP
-```
-
-#### 客戶端部署（client-deployment.yaml）
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: rocketmq-client
-  labels:
-    app: rocketmq-client
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: rocketmq-client
-  template:
-    metadata:
-      labels:
-        app: rocketmq-client
-    spec:
-      containers:
-      - name: rocketmq-client
-        image: harbor.trevi-dev.cc/cpp_run/rocketmq-client:v2
-        env:
-        - name: ROCKETMQ_NAMESERVER
-          value: "10.43.171.188:9876"
-        - name: POD_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
-        - name: POD_NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
-        resources:
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
-            memory: "256Mi"
-            cpu: "200m"
-        command: ["./client"]
-        args: []
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: rocketmq-client-service
-  labels:
-    app: rocketmq-client
-spec:
-  selector:
-    app: rocketmq-client
-  ports:
-  - protocol: TCP
-    port: 8080
-    targetPort: 8080
-  type: ClusterIP
-```
-
-### 部署命令
 ```bash
-# 構建鏡像
-docker build -f Dockerfile.server -t harbor.trevi-dev.cc/cpp_run/rocketmq-server:v4 .
-docker build -f Dockerfile.client -t harbor.trevi-dev.cc/cpp_run/rocketmq-client:v2 .
+# 執行構建和推送腳本
+./build-and-push.sh
+```
+
+這將：
+- 構建服務端鏡像：`harbor.trevi-dev.cc/cpp_run/rocketmq-server:latest`
+- 構建客戶端鏡像：`harbor.trevi-dev.cc/cpp_run/rocketmq-client:latest`
+- 推送鏡像到 Harbor 倉庫
+
+### 2. 手動構建（可選）
+
+```bash
+# 構建服務端鏡像
+docker build -f Dockerfile.server -t harbor.trevi-dev.cc/cpp_run/rocketmq-server:latest .
+
+# 構建客戶端鏡像
+docker build -f Dockerfile.client -t harbor.trevi-dev.cc/cpp_run/rocketmq-client:latest .
 
 # 推送鏡像
-docker push harbor.trevi-dev.cc/cpp_run/rocketmq-server:v4
-docker push harbor.trevi-dev.cc/cpp_run/rocketmq-client:v2
+docker push harbor.trevi-dev.cc/cpp_run/rocketmq-server:latest
+docker push harbor.trevi-dev.cc/cpp_run/rocketmq-client:latest
+```
 
+## ☸️ Kubernetes 部署
+
+### 1. 多環境部署
+
+#### Kubernetes 環境部署
+```bash
+# 部署到 Kubernetes 環境
+./deploy.sh k8s default v1.0.0
+
+# 或者使用默認參數
+./deploy.sh
+```
+
+#### 測試環境部署
+```bash
+# 部署到測試環境
+./deploy.sh test default latest
+```
+
+
+
+### 3. 手動部署
+
+```bash
+# 構建並推送 topics 創建工具
+docker build -f Dockerfile.topics -t harbor.trevi-dev.cc/cpp_run/rocketmq-topics:latest .
+docker push harbor.trevi-dev.cc/cpp_run/rocketmq-topics:latest
+
+# 創建 RocketMQ topics
+kubectl apply -f k8s/create-topics-job.yaml
+
+# 部署服務端
+kubectl apply -f k8s/server-deployment.yaml
+
+# 部署客戶端
+kubectl apply -f k8s/client-deployment.yaml
+
+# 查看部署狀態
+kubectl get pods -l app=rocketmq-server
+kubectl get pods -l app=rocketmq-client
+
+# 查看日誌
+kubectl logs -l app=rocketmq-server
+kubectl logs -l app=rocketmq-client
+```
+
+## 🔧 配置說明
+
+### 環境變數
+
+| 變數名 | 描述 | 默認值 | 示例 |
+|--------|------|--------|------|
+| `ROCKETMQ_NAMESERVER` | RocketMQ NameServer 地址 | 根據環境自動設置 | `localhost:9876` |
+| `ROCKETMQ_ENVIRONMENT` | 環境類型 | `k8s` | `test` |
+| `ROCKETMQ_GROUP` | 消費者組名稱 | `chat_server_group` | `my_group` |
+| `USER_ID` | 用戶 ID | `user_001` | `test_user` |
+
+### Kubernetes 配置
+
+#### 服務端部署
+- **鏡像**: `harbor.trevi-dev.cc/cpp_run/rocketmq-server:latest`
+- **端口**: 8080 (健康檢查)
+- **資源限制**: 128Mi 內存，100m CPU
+- **健康檢查**: `/health` 和 `/ready` 端點
+
+#### 客戶端部署
+- **鏡像**: `harbor.trevi-dev.cc/cpp_run/rocketmq-client:latest`
+- **資源限制**: 128Mi 內存，100m CPU
+- **一次性任務**: 發送請求後退出
+
+## 📊 監控和日誌
+
+### 查看 Pod 狀態
+
+```bash
+# 查看所有相關 Pod
+kubectl get pods -l app=rocketmq-server
+kubectl get pods -l app=rocketmq-client
+
+# 查看服務
+kubectl get services -l app=rocketmq-server
+kubectl get services -l app=rocketmq-client
+```
+
+### 查看日誌
+
+```bash
+# 查看服務端日誌
+kubectl logs -l app=rocketmq-server --tail=100 -f
+
+# 查看客戶端日誌
+kubectl logs -l app=rocketmq-client --tail=100 -f
+```
+
+### 健康檢查
+
+```bash
+# 檢查服務端健康狀態
+kubectl exec -it $(kubectl get pods -l app=rocketmq-server -o jsonpath='{.items[0].metadata.name}') -- curl http://localhost:8080/health
+
+# 檢查服務端就緒狀態
+kubectl exec -it $(kubectl get pods -l app=rocketmq-server -o jsonpath='{.items[0].metadata.name}') -- curl http://localhost:8080/ready
+```
+
+### 自動 IP 監控
+
+```bash
+# 檢查服務狀態
+kubectl get pods,services -l app=rocketmq-server
+kubectl get pods,services -l app=rocketmq-client
+```
+
+
+
+## 🔍 故障排除
+
+### 常見問題
+
+1. **連接問題**
+   ```bash
+   # 檢查網絡連接
+   telnet rocketmq-nameserver.rocketmq-system.svc.cluster.local 9876
+
+   # 檢查環境變數
+   echo $ROCKETMQ_NAMESERVER
+   echo $ROCKETMQ_GROUP
+   ```
+
+2. **編譯問題**
+   ```bash
+   # 清理並重新安裝依賴
+   go clean -modcache
+   go mod tidy
+   ```
+
+3. **運行時問題**
+   ```bash
+   # 啟用詳細日誌
+   export ROCKETMQ_LOG_LEVEL=debug
+
+   # 檢查端口佔用
+   netstat -tlnp | grep 9876
+   ```
+
+4. **鏡像拉取失敗**
+   ```bash
+   # 檢查 Harbor 登錄狀態
+   docker login harbor.trevi-dev.cc
+   ```
+
+5. **RocketMQ 連接失敗**
+   ```bash
+   # 檢查 RocketMQ 服務狀態
+   kubectl get pods -n rocketmq-system
+   
+   # 檢查 NameServer 服務
+   kubectl get services -n rocketmq-system
+   ```
+
+6. **Pod 啟動失敗**
+   ```bash
+   # 查看 Pod 詳細狀態
+   kubectl describe pod <pod-name>
+   
+   # 查看 Pod 事件
+   kubectl get events --sort-by='.lastTimestamp'
+   ```
+
+7. **健康檢查失敗**
+   ```bash
+   # 檢查服務端是否正常監聽
+   kubectl exec -it <server-pod-name> -- netstat -tlnp
+   ```
+
+### 調試命令
+
+```bash
+# 進入 Pod 調試
+kubectl exec -it <pod-name> -- /bin/sh
+
+# 查看環境變數
+kubectl exec -it <pod-name> -- env
+
+# 測試網絡連接
+kubectl exec -it <pod-name> -- nslookup rocketmq-nameserver.rocketmq-system.svc.cluster.local
+```
+
+## 🧹 清理
+
+### 刪除部署
+
+```bash
+# 刪除所有相關資源
+kubectl delete -f k8s/server-deployment.yaml
+kubectl delete -f k8s/client-deployment.yaml
+
+# 或者刪除所有相關 Pod 和服務
+kubectl delete pods,services -l app=rocketmq-server
+kubectl delete pods,services -l app=rocketmq-client
+```
+
+### 刪除鏡像（可選）
+
+```bash
+# 從 Harbor 刪除鏡像（需要管理員權限）
+docker rmi harbor.trevi-dev.cc/cpp_run/rocketmq-server:latest
+docker rmi harbor.trevi-dev.cc/cpp_run/rocketmq-client:latest
+```
+
+## 📝 注意事項
+
+1. **RocketMQ 依賴**: 確保 Kubernetes 集群中已部署 RocketMQ
+2. **網絡策略**: 確保 Pod 可以訪問 RocketMQ 服務
+3. **資源限制**: 根據實際需求調整 CPU 和內存限制
+4. **鏡像版本**: 建議使用特定版本標籤而不是 `latest`
+5. **日誌輪轉**: 生產環境建議配置日誌輪轉和持久化
+
+## 🚀 擴展建議
+
+1. **水平擴展**: 可以部署多個服務端實例
+2. **配置管理**: 使用 ConfigMap 管理配置
+3. **密鑰管理**: 使用 Secret 管理敏感信息
+4. **監控集成**: 集成 Prometheus 和 Grafana
+5. **日誌聚合**: 使用 ELK 或 Fluentd 進行日誌聚合
+
+## 🎯 最佳實踐
+
+### 1. **配置管理**
+- 使用 ConfigMap 集中管理配置
+- 為不同環境創建不同的配置文件
+- 使用環境變數覆蓋默認配置
+
+### 2. **監控和告警**
+- 設置日誌監控和告警
+- 定期檢查服務健康狀態
+
+### 3. **部署策略**
+- 使用藍綠部署或滾動更新
+- 設置資源限制和健康檢查
+- 配置自動擴縮容
+
+### 4. **安全考慮**
+- 使用 RBAC 控制訪問權限
+- 配置網絡策略
+- 定期更新鏡像和依賴
+
+
+
+## 🛠️ 實用工具
+
+### 監控腳本
+```bash
+# 檢查服務狀態
+kubectl get pods,services -l app=rocketmq-server
+kubectl get pods,services -l app=rocketmq-client
+```
+
+### 部署腳本
+```bash
 # 部署到 Kubernetes
+./deploy.sh
+
+# 手動部署
 kubectl apply -f k8s/server-deployment.yaml
 kubectl apply -f k8s/client-deployment.yaml
 ```
 
-## 故障排除與解決方案
-
-### 已解決的關鍵問題
-
-#### 1. **Broker 內部/外部 IP 連接問題** ⭐️
-**問題描述**：
-- Kubernetes 內部的 pods 無法連接到 RocketMQ Broker
-- 錯誤現象：client 和 server 能連接到 NameServer，但無法連接到 Broker
-- 根本原因：Broker 配置使用外部 IP `10.1.7.229:10911`，K8s 內部 pods 無法路由到此地址
-
-**解決方案**：
-修改 RocketMQ Broker 配置，使用內部服務地址：
-```yaml
-# 修改前（K8s 內部無法連接）
-brokerIP1 = 10.1.7.229
-
-# 修改後（K8s 內部可以連接）
-brokerIP1 = rocketmq-broker-ondemand-internal.rocketmq-system.svc.cluster.local
-brokerIP2 = rocketmq-broker-ondemand-internal.rocketmq-system.svc.cluster.local
-```
-
-**修復步驟**：
+### 本地測試
 ```bash
-# 1. 修改 broker 配置檔案
-vim /Users/tomas/Projects/shared_utils/deployments/self-host/rocketmq/broker-ondemand-deployment.yaml
-
-# 2. 重新應用配置
-kubectl apply -f /Users/tomas/Projects/shared_utils/deployments/self-host/rocketmq/broker-ondemand-deployment.yaml
-
-# 3. 重新啟動 broker pods
-kubectl rollout restart statefulset/rocketmq-broker-ondemand -n rocketmq-system
-
-# 4. 驗證 broker 使用新的內部地址
-kubectl logs rocketmq-broker-ondemand-0 -n rocketmq-system --tail=5
+# 本地運行
+./run-local.sh <nameserver-address>
 ```
 
-#### 2. **Docker 容器架構兼容性問題**
-**問題描述**：
-- 錯誤信息：`exec format error`
-- 原因：Dockerfile 構建配置問題，binary 檔案路徑錯誤
 
-**解決方案**：
-```dockerfile
-# 修改前（錯誤的構建路徑）
-RUN go build -o server ./server/main.go
-COPY --from=builder /app/server ./server
 
-# 修改後（正確的構建路徑）
-RUN go build -o /app/myserver ./server/main.go
-COPY --from=builder /app/myserver ./server
-```
+## 🎉 總結
 
-#### 3. **RocketMQ Topics 創建**
-**問題描述**：
-- 應用啟動時 topics 不存在，訂閱失敗
+這個多環境解決方案提供了：
 
-**解決方案**：
-```bash
-# 進入 broker pod 創建 topics
-kubectl exec -it rocketmq-broker-ondemand-0 -n rocketmq-system -- sh
+✅ **靈活性** - 支持 Kubernetes 和測試環境  
+✅ **簡潔性** - 簡化的部署配置  
+✅ **穩定性** - 直接使用固定 IP 地址  
+✅ **可維護性** - 簡化的配置管理  
+✅ **兼容性** - 與 RocketMQ Go 客戶端完全兼容  
 
-# 創建必要的 topics
-sh mqadmin updateTopic -t TG001-chat-service-requests -c DefaultCluster
-sh mqadmin updateTopic -t TG001-chat-service-responses -c DefaultCluster  
-sh mqadmin updateTopic -t TG001-chat-service-events -c DefaultCluster
-
-# 驗證 topics 創建成功
-sh mqadmin topicList -c DefaultCluster
-```
-
-### 常見問題與排除方法
-
-#### 1. **連接失敗**
-**診斷步驟**：
-```bash
-# 檢查 NameServer 狀態
-kubectl get pods -n rocketmq-system -l app=rocketmq-nameserver
-
-# 檢查 Broker 狀態
-kubectl get pods -n rocketmq-system -l app=rocketmq-broker-ondemand
-
-# 檢查服務端點
-kubectl get svc -n rocketmq-system
-
-# 測試網絡連通性
-kubectl exec -it <your-pod> -- telnet 10.43.171.188 9876
-```
-
-**解決方案**：
-- 檢查 NameServer 地址是否正確
-- 確認網絡連接正常  
-- 檢查防火墻設置
-- 驗證 Service 和 Endpoints 配置
-
-#### 2. **消息發送失敗**
-**診斷步驟**：
-```bash
-# 檢查 producer 日誌
-kubectl logs -l app=rocketmq-server --tail=50
-
-# 檢查 topics 是否存在
-kubectl exec -it rocketmq-broker-ondemand-0 -n rocketmq-system -- sh mqadmin topicList -c DefaultCluster
-
-# 檢查 broker 註冊狀態
-kubectl logs rocketmq-broker-ondemand-0 -n rocketmq-system | grep "boot success"
-```
-
-**解決方案**：
-- 檢查 Topic 是否存在
-- 確認生產者權限
-- 檢查消息格式
-- 驗證 broker 連接狀態
-
-#### 3. **消息接收失敗**  
-**診斷步驟**：
-```bash
-# 檢查 consumer 日誌
-kubectl logs -l app=rocketmq-client --tail=50
-
-# 檢查消費者組狀態
-kubectl exec -it rocketmq-broker-ondemand-0 -n rocketmq-system -- sh mqadmin consumerProgress -g chat_client_group_consumer
-
-# 檢查訂閱關係
-kubectl exec -it rocketmq-broker-ondemand-0 -n rocketmq-system -- sh mqadmin updateSubGroup -g chat_client_group_consumer -c DefaultCluster
-```
-
-**解決方案**：
-- 檢查消費者組名
-- 確認訂閱的 Topic 正確
-- 檢查消費者權限
-- 驗證消息偏移量
-
-### 監控與調試
-
-#### 1. **啟用詳細日誌**
-```go
-// 在應用中加入詳細日誌
-log.Printf("連接 NameServer: %s", nameserver)
-log.Printf("創建生產者，組名: %s", groupName+"_producer")
-log.Printf("訂閱主題: %s", "TG001-chat-service-requests")
-```
-
-#### 2. **檢查連接狀態**
-```bash
-# 檢查 pod 狀態
-kubectl get pods -l app=rocketmq-server -o wide
-kubectl get pods -l app=rocketmq-client -o wide
-
-# 檢查服務狀態  
-kubectl get svc rocketmq-server-service
-kubectl get svc rocketmq-client-service
-
-# 檢查資源使用情況
-kubectl top pods -l app=rocketmq-server
-kubectl top pods -l app=rocketmq-client
-```
-
-#### 3. **網絡連通性測試**
-```bash
-# 從應用 pod 測試連接 NameServer
-kubectl exec -it <pod-name> -- telnet 10.43.171.188 9876
-
-# 測試 broker 連接（內部地址）
-kubectl exec -it <pod-name> -- nslookup rocketmq-broker-ondemand-internal.rocketmq-system.svc.cluster.local
-
-# 檢查 DNS 解析
-kubectl exec -it <pod-name> -- cat /etc/resolv.conf
-```
-
-### 成功驗證指標
-
-#### ✅ 系統正常運行的標誌：
-1. **Broker 日誌顯示內部地址**：
-   ```
-   The broker[broker-ondemand, rocketmq-broker-ondemand-internal.rocketmq-system.svc.cluster.local:10911] boot success.
-   ```
-
-2. **Consumer 成功更新偏移量**：
-   ```
-   time="2025-07-31T01:21:45Z" level=info msg="update offset to broker success" MessageQueue="MessageQueue [topic=TG001-chat-service-events, brokerName=broker-ondemand, queueId=1]"
-   ```
-
-3. **Server 和 Client 都正常運行**：
-   ```bash
-   kubectl get pods -l app=rocketmq-server  # STATUS: Running
-   kubectl get pods -l app=rocketmq-client  # STATUS: Running
-   ```
-
-4. **消息正常傳遞**：
-   ```
-   2025/07/31 01:22:07 收到事件消息: {"user_id":"user_001","message":"Hello, everyone!"}
-   2025/07/31 01:22:07 处理事件: 用户 user_001 发送消息: Hello, everyone!
-   ```
-
-### 部署最佳實踐
-
-1. **健康檢查配置**：應用包含 `/health` 和 `/ready` 端點
-2. **資源限制**：設置適當的 CPU 和記憶體限制
-3. **環境變數管理**：使用 ConfigMap 和 Secret 管理配置
-4. **日誌收集**：結構化日誌輸出，便於監控和調試
-5. **優雅關閉**：實現信號處理，確保連接正確關閉 
+這個簡化的解決方案確保服務的穩定運行和易於維護。 

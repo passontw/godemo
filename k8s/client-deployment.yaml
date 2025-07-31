@@ -16,13 +16,12 @@ spec:
     spec:
       containers:
       - name: rocketmq-client
-        image: harbor.trevi-dev.cc/cpp_run/rocketmq-client:v2
+        image: harbor.trevi-dev.cc/cpp_run/rocketmq-client:v4
         env:
         - name: ROCKETMQ_NAMESERVER
-          valueFrom:
-            configMapKeyRef:
-              name: rocketmq-config
-              key: nameserver
+          value: "10.1.7.229:9876"
+        - name: ROCKETMQ_ENVIRONMENT
+          value: "k8s"
         - name: POD_NAME
           valueFrom:
             fieldRef:

@@ -1,4 +1,4 @@
-FROM golang:1.24.1-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
@@ -9,18 +9,23 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # 複製源代碼
-COPY create-topics.go .
+COPY create-topics.go ./
 
-# 編譯應用程序
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o topics create-topics.go
+# 構建應用
+RUN GOOS=linux GOARCH=amd64 go build -o create-topics create-topics.go
 
-# 使用 alpine 作為運行時環境
+# 運行階段
 FROM alpine:latest
 
 RUN apk --no-cache add ca-certificates
 
 WORKDIR /root/
 
-COPY --from=builder /app/topics .
+# 複製構建好的二進制文件
+COPY --from=builder /app/create-topics .
 
-CMD ["./topics"]
+# 設置執行權限
+RUN chmod +x create-topics
+
+# 設置默認命令
+CMD ["./create-topics"] 

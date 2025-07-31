@@ -85,7 +85,7 @@ func (s *ChatServer) Start() error {
 	// 订阅请求主题 - 使用延遲訂閱策略
 	go func() {
 		time.Sleep(5 * time.Second) // 等待 topics 就緒
-		
+
 		// 嘗試訂閱請求主题
 		maxRetries := 5
 		for i := 0; i < maxRetries; i++ {
@@ -282,16 +282,22 @@ func main() {
 	log.Printf("服务端启动中...")
 
 	// 从环境变量获取配置
-	nameserver := os.Getenv("ROCKETMQ_NAMESERVER")
-	if nameserver == "" {
-		// 使用 RocketMQ nameserver 的对外访问地址
-		// 支持多种访问方式：
-		// 1. NodePort: <任何節點IP>:30876
-		// 2. LoadBalancer: <LoadBalancer IP>:9876
-		// 3. 本地端口转发: 127.0.0.1:9876
-		nameserver = "127.0.0.1:9876" // 默认使用本地端口转发
+	environment := os.Getenv("ROCKETMQ_ENVIRONMENT")
+	if environment == "" {
+		environment = "k8s" // 默認使用 Kubernetes 環境
 	}
 
+	nameserver := os.Getenv("ROCKETMQ_NAMESERVER")
+	if nameserver == "" {
+		// 根據環境設置默認值
+		if environment == "test" {
+			nameserver = "localhost:9876" // 測試環境默認值
+		} else {
+			nameserver = "127.0.0.1:9876" // Kubernetes 環境默認值
+		}
+	}
+
+	log.Printf("使用環境: %s", environment)
 	log.Printf("使用 nameserver: %s", nameserver)
 
 	groupName := os.Getenv("ROCKETMQ_GROUP")
