@@ -16,10 +16,13 @@ spec:
     spec:
       containers:
       - name: rocketmq-server
-        image: harbor.trevi-dev.cc/cpp_run/rocketmq-server:latest
+        image: harbor.trevi-dev.cc/cpp_run/rocketmq-server:v4
         env:
         - name: ROCKETMQ_NAMESERVER
-          value: "rocketmq-nameserver.rocketmq-system.svc.cluster.local:9876"
+          valueFrom:
+            configMapKeyRef:
+              name: rocketmq-config
+              key: nameserver
         - name: POD_NAME
           valueFrom:
             fieldRef:

@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(kubectl get pods:*)",
+      "Bash(kubectl get svc:*)",
+      "Bash(kubectl get:*)",
+      "Bash(kubectl logs:*)",
+      "Bash(kubectl describe:*)",
+      "Bash(kubectl delete:*)",
+      "Bash(kubectl apply:*)",
+      "Bash(kubectl run:*)",
+      "Bash(docker build:*)",
+      "Bash(docker push:*)",
+      "Bash(kubectl exec:*)",
+      "Bash(for broker_ip in 10.42.0.47 10.42.0.50 10.42.0.53)",
+      "Bash(do)",
+      "Bash(for:*)",
+      "Bash(done)",
+      "Bash(ls:*)",
+      "Bash(go build:*)",
+      "Bash(docker run:*)",
+      "Bash(kubectl rollout restart:*)"
+    ],
+    "deny": []
+  }
+}

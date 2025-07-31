@@ -82,20 +82,44 @@ func (s *ChatServer) Start() error {
 	}
 	s.consumer = c
 
-	// 订阅请求主题
-	if err := s.consumer.Subscribe("TG001-chat-service-requests", consumer.MessageSelector{}, s.handleRequest); err != nil {
-		return fmt.Errorf("订阅请求主题失败: %v", err)
-	}
+	// 订阅请求主题 - 使用延遲訂閱策略
+	go func() {
+		time.Sleep(5 * time.Second) // 等待 topics 就緒
+		
+		// 嘗試訂閱請求主题
+		maxRetries := 5
+		for i := 0; i < maxRetries; i++ {
+			if err := s.consumer.Subscribe("TG001-chat-service-requests", consumer.MessageSelector{}, s.handleRequest); err != nil {
+				log.Printf("订阅请求主题失败 (尝试 %d/%d): %v", i+1, maxRetries, err)
+				time.Sleep(time.Duration(i+1) * 2 * time.Second)
+				continue
+			}
+			log.Printf("成功订阅请求主题")
+			break
+		}
 
-	// 订阅事件主题
-	if err := s.consumer.Subscribe("TG001-chat-service-events", consumer.MessageSelector{}, s.handleEvent); err != nil {
-		return fmt.Errorf("订阅事件主题失败: %v", err)
-	}
+		// 嘗試訂閱事件主题
+		for i := 0; i < maxRetries; i++ {
+			if err := s.consumer.Subscribe("TG001-chat-service-events", consumer.MessageSelector{}, s.handleEvent); err != nil {
+				log.Printf("订阅事件主题失败 (尝试 %d/%d): %v", i+1, maxRetries, err)
+				time.Sleep(time.Duration(i+1) * 2 * time.Second)
+				continue
+			}
+			log.Printf("成功订阅事件主题")
+			break
+		}
 
-	// 启动消费者
-	if err := s.consumer.Start(); err != nil {
-		return fmt.Errorf("启动消费者失败: %v", err)
-	}
+		// 启动消费者
+		for i := 0; i < maxRetries; i++ {
+			if err := s.consumer.Start(); err != nil {
+				log.Printf("启动消费者失败 (尝试 %d/%d): %v", i+1, maxRetries, err)
+				time.Sleep(time.Duration(i+1) * 2 * time.Second)
+				continue
+			}
+			log.Printf("成功启动消费者")
+			break
+		}
+	}()
 
 	log.Printf("聊天服务端已启动，监听请求和事件...")
 	return nil
