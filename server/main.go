@@ -11,10 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/apache/rocketmq-client-go/v2"
+	rocketmqclient "godemo/pkg/rocketmq-client"
+
 	"github.com/apache/rocketmq-client-go/v2/consumer"
-	"github.com/apache/rocketmq-client-go/v2/primitive"
-	"github.com/apache/rocketmq-client-go/v2/producer"
 )
 
 // 消息结构
@@ -41,55 +40,77 @@ type ChatResponse struct {
 
 // 服务端结构
 type ChatServer struct {
-	producer   rocketmq.Producer
-	consumer   rocketmq.PushConsumer
+	client     *rocketmqclient.Client
 	nameserver string
 	groupName  string
+	serverID   string
 }
 
 // 创建新的服务端
 func NewChatServer(nameserver, groupName string) *ChatServer {
+	// 為每個 server 實體生成唯一的 group name 和 server ID
+	uniqueGroupName := fmt.Sprintf("%s_%d", groupName, time.Now().UnixNano())
+	serverID := fmt.Sprintf("server_%d", time.Now().UnixNano())
+
 	return &ChatServer{
 		nameserver: nameserver,
-		groupName:  groupName,
+		groupName:  uniqueGroupName,
+		serverID:   serverID,
 	}
 }
 
 // 启动服务端
 func (s *ChatServer) Start() error {
-	// 创建生产者
-	p, err := rocketmq.NewProducer(
-		producer.WithNameServer([]string{s.nameserver}),
-		producer.WithGroupName(s.groupName+"_producer"),
-	)
+	// 配置 RocketMQ 客戶端
+	config := rocketmqclient.RocketMQConfig{
+		Name:          s.serverID,
+		NameServers:   []string{s.nameserver},
+		Retry:         rocketmqclient.DefaultRetryConfig(),
+		Timeout:       rocketmqclient.DefaultTimeoutConfig(),
+		DNS:           rocketmqclient.DefaultDNSConfig(),
+		ErrorHandling: rocketmqclient.DefaultErrorHandlingConfig(),
+	}
+
+	// 註冊客戶端
+	if err := rocketmqclient.Register(context.Background(), config); err != nil {
+		return fmt.Errorf("註冊 RocketMQ 客戶端失敗: %v", err)
+	}
+
+	// 獲取客戶端實例
+	client, err := rocketmqclient.GetClient(s.serverID)
 	if err != nil {
-		return fmt.Errorf("创建生产者失败: %v", err)
+		return fmt.Errorf("獲取 RocketMQ 客戶端失敗: %v", err)
 	}
-	s.producer = p
+	s.client = client
 
-	// 启动生产者
-	if err := s.producer.Start(); err != nil {
-		return fmt.Errorf("启动生产者失败: %v", err)
-	}
+	// 設置日誌
+	client.SetLogger(&ServerLogger{})
 
-	// 创建消费者
-	c, err := rocketmq.NewPushConsumer(
-		consumer.WithNameServer([]string{s.nameserver}),
-		consumer.WithGroupName(s.groupName+"_consumer"),
-	)
-	if err != nil {
-		return fmt.Errorf("创建消费者失败: %v", err)
-	}
-	s.consumer = c
+	// 設置指標回調
+	client.SetMetrics(func(event string, labels map[string]string, value float64) {
+		log.Printf("指標: %s, 標籤: %v, 數值: %.2f", event, labels, value)
+	})
 
-	// 订阅请求主题 - 使用延遲訂閱策略
+	// 訂閱請求主题 - 使用延遲訂閱策略
 	go func() {
 		time.Sleep(5 * time.Second) // 等待 topics 就緒
 
 		// 嘗試訂閱請求主题
 		maxRetries := 5
 		for i := 0; i < maxRetries; i++ {
-			if err := s.consumer.Subscribe("TG001-chat-service-requests", consumer.MessageSelector{}, s.handleRequest); err != nil {
+			subscribeConfig := &rocketmqclient.SubscribeConfig{
+				Topic:               "TG001-chat-service-requests",
+				Tag:                 "",
+				ConsumerGroup:       s.groupName + "_consumer",
+				ConsumeFromWhere:    consumer.ConsumeFromLastOffset,
+				ConsumeMode:         consumer.Clustering,
+				MaxReconsumeTimes:   3,
+				MessageBatchMaxSize: 1,
+				PullInterval:        time.Second,
+				PullBatchSize:       32,
+			}
+
+			if err := s.client.Subscribe(context.Background(), subscribeConfig, s.handleRequest); err != nil {
 				log.Printf("订阅请求主题失败 (尝试 %d/%d): %v", i+1, maxRetries, err)
 				time.Sleep(time.Duration(i+1) * 2 * time.Second)
 				continue
@@ -100,7 +121,19 @@ func (s *ChatServer) Start() error {
 
 		// 嘗試訂閱事件主题
 		for i := 0; i < maxRetries; i++ {
-			if err := s.consumer.Subscribe("TG001-chat-service-events", consumer.MessageSelector{}, s.handleEvent); err != nil {
+			eventSubscribeConfig := &rocketmqclient.SubscribeConfig{
+				Topic:               "TG001-chat-service-events",
+				Tag:                 "",
+				ConsumerGroup:       s.groupName + "_event_consumer",
+				ConsumeFromWhere:    consumer.ConsumeFromLastOffset,
+				ConsumeMode:         consumer.Clustering,
+				MaxReconsumeTimes:   3,
+				MessageBatchMaxSize: 1,
+				PullInterval:        time.Second,
+				PullBatchSize:       32,
+			}
+
+			if err := s.client.Subscribe(context.Background(), eventSubscribeConfig, s.handleEvent); err != nil {
 				log.Printf("订阅事件主题失败 (尝试 %d/%d): %v", i+1, maxRetries, err)
 				time.Sleep(time.Duration(i+1) * 2 * time.Second)
 				continue
@@ -108,264 +141,216 @@ func (s *ChatServer) Start() error {
 			log.Printf("成功订阅事件主题")
 			break
 		}
-
-		// 启动消费者
-		for i := 0; i < maxRetries; i++ {
-			if err := s.consumer.Start(); err != nil {
-				log.Printf("启动消费者失败 (尝试 %d/%d): %v", i+1, maxRetries, err)
-				time.Sleep(time.Duration(i+1) * 2 * time.Second)
-				continue
-			}
-			log.Printf("成功启动消费者")
-			break
-		}
 	}()
 
-	log.Printf("聊天服务端已启动，监听请求和事件...")
+	log.Printf("Chat Server 已啟動 (Server ID: %s, Group: %s)", s.serverID, s.groupName)
 	return nil
 }
 
-// 处理请求消息 (Request-Response 模式)
-func (s *ChatServer) handleRequest(ctx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
-	for _, msg := range msgs {
-		log.Printf("收到请求消息: %s", string(msg.Body))
-
-		// 解析请求
-		var request ChatRequest
-		if err := json.Unmarshal(msg.Body, &request); err != nil {
-			log.Printf("解析请求失败: %v", err)
-			continue
-		}
-
-		// 处理请求
-		response := s.processRequest(request)
-
-		// 发送响应
-		if err := s.sendResponse(request.RequestID, response); err != nil {
-			log.Printf("发送响应失败: %v", err)
-		}
+// 處理請求
+func (s *ChatServer) handleRequest(ctx context.Context, msg *rocketmqclient.ConsumeMessage) error {
+	var request ChatRequest
+	if err := json.Unmarshal(msg.Body, &request); err != nil {
+		log.Printf("解析請求失敗: %v", err)
+		return err
 	}
-	return consumer.ConsumeSuccess, nil
+
+	log.Printf("收到請求: %s, 用戶: %s, 動作: %s", request.RequestID, request.UserID, request.Action)
+
+	// 處理請求
+	response := s.processRequest(request)
+
+	// 發送響應
+	if err := s.sendResponse(request.RequestID, response); err != nil {
+		log.Printf("發送響應失敗: %v", err)
+		return err
+	}
+
+	return nil
 }
 
-// 处理事件消息 (Publish-Subscribe 模式)
-func (s *ChatServer) handleEvent(ctx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
-	for _, msg := range msgs {
-		log.Printf("收到事件消息: %s", string(msg.Body))
-
-		// 解析事件
-		var event ChatMessage
-		if err := json.Unmarshal(msg.Body, &event); err != nil {
-			log.Printf("解析事件失败: %v", err)
-			continue
-		}
-
-		// 处理事件
-		s.processEvent(event)
+// 處理事件
+func (s *ChatServer) handleEvent(ctx context.Context, msg *rocketmqclient.ConsumeMessage) error {
+	var event ChatMessage
+	if err := json.Unmarshal(msg.Body, &event); err != nil {
+		log.Printf("解析事件失敗: %v", err)
+		return err
 	}
-	return consumer.ConsumeSuccess, nil
+
+	log.Printf("收到事件: 用戶: %s, 類型: %s", event.UserID, event.Type)
+
+	// 處理事件
+	s.processEvent(event)
+
+	return nil
 }
 
-// 处理请求
+// 處理請求邏輯
 func (s *ChatServer) processRequest(request ChatRequest) ChatResponse {
-	log.Printf("处理请求: %s, 用户: %s, 动作: %s", request.RequestID, request.UserID, request.Action)
-
 	response := ChatResponse{
 		RequestID: request.RequestID,
 		Success:   true,
+		Data:      nil,
 	}
 
 	switch request.Action {
 	case "send_message":
-		// 模拟发送消息
-		response.Data = map[string]interface{}{
-			"message_id": fmt.Sprintf("msg_%d", time.Now().Unix()),
-			"status":     "sent",
+		if data, ok := request.Data.(map[string]interface{}); ok {
+			if message, exists := data["message"].(string); exists {
+				// 模擬處理消息
+				response.Data = map[string]interface{}{
+					"status":    "sent",
+					"message":   message,
+					"timestamp": time.Now(),
+				}
+				log.Printf("處理發送消息請求: %s", message)
+			}
 		}
-		log.Printf("消息已发送: %s", response.Data)
-
 	case "get_history":
-		// 模拟获取历史记录
-		response.Data = []map[string]interface{}{
-			{"message": "Hello", "timestamp": time.Now().Add(-time.Hour)},
-			{"message": "How are you?", "timestamp": time.Now().Add(-30 * time.Minute)},
+		// 模擬獲取歷史記錄
+		response.Data = map[string]interface{}{
+			"messages": []map[string]interface{}{
+				{"id": "1", "message": "Hello", "timestamp": time.Now().Add(-time.Hour)},
+				{"id": "2", "message": "World", "timestamp": time.Now().Add(-30 * time.Minute)},
+			},
 		}
-		log.Printf("历史记录已返回: %d 条消息", len(response.Data.([]map[string]interface{})))
-
+		log.Printf("處理獲取歷史記錄請求")
 	default:
 		response.Success = false
-		response.Error = "未知的操作类型"
+		response.Error = fmt.Sprintf("未知動作: %s", request.Action)
 	}
 
 	return response
 }
 
-// 处理事件
+// 處理事件邏輯
 func (s *ChatServer) processEvent(event ChatMessage) {
-	log.Printf("处理事件: 用户 %s 发送消息: %s", event.UserID, event.Message)
-
-	// 模拟事件处理逻辑
-	switch event.Type {
-	case "user_join":
-		log.Printf("用户 %s 加入聊天", event.UserID)
-	case "user_leave":
-		log.Printf("用户 %s 离开聊天", event.UserID)
-	case "message_sent":
-		log.Printf("用户 %s 发送消息: %s", event.UserID, event.Message)
-	}
+	log.Printf("處理事件: 用戶 %s 的 %s 事件", event.UserID, event.Type)
+	// 這裡可以添加事件處理邏輯
 }
 
-// 发送响应
+// 發送響應
 func (s *ChatServer) sendResponse(requestID string, response ChatResponse) error {
-	responseData, err := json.Marshal(response)
+	responseBody, err := json.Marshal(response)
 	if err != nil {
-		return fmt.Errorf("序列化响应失败: %v", err)
+		return fmt.Errorf("序列化響應失敗: %v", err)
 	}
 
-	msg := &primitive.Message{
-		Topic: "TG001-chat-service-responses",
-		Body:  responseData,
+	// 使用 pkg/rocketmq-client 發送響應
+	options := map[string]interface{}{
+		"properties": map[string]string{
+			"request_id": requestID,
+			"server_id":  s.serverID,
+		},
 	}
 
-	// 设置消息属性
-	msg.WithProperty("request_id", requestID)
-	msg.WithProperty("response_type", "chat_response")
-
-	// 发送消息
-	result, err := s.producer.SendSync(context.Background(), msg)
-	if err != nil {
-		return fmt.Errorf("发送响应失败: %v", err)
+	key := fmt.Sprintf("response:%s", requestID)
+	if err := s.client.PublishPersistent(context.Background(), "TG001-chat-service-responses", "", key, responseBody, options); err != nil {
+		return fmt.Errorf("發送響應失敗: %v", err)
 	}
 
-	log.Printf("响应已发送: %s", result.String())
+	log.Printf("響應已發送: %s", requestID)
 	return nil
 }
 
-// 发布事件
+// 發布事件
 func (s *ChatServer) PublishEvent(event ChatMessage) error {
-	eventData, err := json.Marshal(event)
+	eventBody, err := json.Marshal(event)
 	if err != nil {
-		return fmt.Errorf("序列化事件失败: %v", err)
+		return fmt.Errorf("序列化事件失敗: %v", err)
 	}
 
-	msg := &primitive.Message{
-		Topic: "TG001-chat-service-events",
-		Body:  eventData,
+	// 使用 pkg/rocketmq-client 發布事件
+	options := map[string]interface{}{
+		"properties": map[string]string{
+			"server_id":  s.serverID,
+			"event_type": event.Type,
+		},
 	}
 
-	// 设置消息属性
-	msg.WithProperty("event_type", event.Type)
-	msg.WithProperty("user_id", event.UserID)
-
-	// 发送消息
-	result, err := s.producer.SendSync(context.Background(), msg)
-	if err != nil {
-		return fmt.Errorf("发布事件失败: %v", err)
+	key := fmt.Sprintf("event:%s:%s", event.UserID, event.Type)
+	if err := s.client.PublishPersistent(context.Background(), "TG001-chat-service-events", "", key, eventBody, options); err != nil {
+		return fmt.Errorf("發布事件失敗: %v", err)
 	}
 
-	log.Printf("事件已发布: %s", result.String())
+	log.Printf("事件已發布: 用戶 %s, 類型 %s", event.UserID, event.Type)
 	return nil
 }
 
-// 停止服务端
+// 停止服務端
 func (s *ChatServer) Stop() {
-	if s.producer != nil {
-		s.producer.Shutdown()
+	if s.client != nil {
+		// 開始優雅關機
+		s.client.StartGracefulShutdown()
+
+		// 等待處理完成
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := s.client.WaitForProcessingComplete(ctx); err != nil {
+			log.Printf("等待處理完成時發生錯誤: %v", err)
+		}
+
+		// 關閉客戶端
+		s.client.Close()
 	}
-	if s.consumer != nil {
-		s.consumer.Shutdown()
-	}
-	log.Printf("聊天服务端已停止")
+	log.Printf("Chat Server 已停止")
+}
+
+// ServerLogger 實作 Logger 介面
+type ServerLogger struct{}
+
+func (l *ServerLogger) Infof(format string, args ...interface{}) {
+	log.Printf("[SERVER] "+format, args...)
+}
+
+func (l *ServerLogger) Errorf(format string, args ...interface{}) {
+	log.Printf("[SERVER ERROR] "+format, args...)
 }
 
 func main() {
-	log.Printf("服务端启动中...")
+	log.Printf("🚀 啟動 Chat Server...")
 
-	// 从环境变量获取配置
-	environment := os.Getenv("ROCKETMQ_ENVIRONMENT")
-	if environment == "" {
-		environment = "k8s" // 默認使用 Kubernetes 環境
+	// 配置
+	nameserver := "localhost:9876"
+	if envNS := os.Getenv("ROCKETMQ_NAMESERVER"); envNS != "" {
+		nameserver = envNS
 	}
 
-	nameserver := os.Getenv("ROCKETMQ_NAMESERVER")
-	if nameserver == "" {
-		// 根據環境設置默認值
-		if environment == "test" {
-			nameserver = "localhost:9876" // 測試環境默認值
-		} else {
-			nameserver = "127.0.0.1:9876" // Kubernetes 環境默認值
-		}
-	}
+	// 創建服務端
+	server := NewChatServer(nameserver, "chat_server_group")
 
-	log.Printf("使用環境: %s", environment)
-	log.Printf("使用 nameserver: %s", nameserver)
-
-	groupName := os.Getenv("ROCKETMQ_GROUP")
-	if groupName == "" {
-		groupName = "chat_server_group"
-	}
-
-	log.Printf("使用 group name: %s", groupName)
-
-	// 启动健康检查服务
-	go func() {
-		log.Printf("启动健康检查服务...")
-		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-			log.Printf("收到健康检查请求")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("OK"))
-		})
-		http.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
-			log.Printf("收到就绪检查请求")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("OK"))
-		})
-		log.Printf("健康检查服务启动在端口 8080")
-		if err := http.ListenAndServe(":8080", nil); err != nil {
-			log.Printf("健康检查服务启动失败: %v", err)
-		}
-	}()
-
-	// 创建服务端
-	log.Printf("创建聊天服务端...")
-	server := NewChatServer(nameserver, groupName)
-
-	// 启动服务端
-	log.Printf("启动聊天服务端...")
+	// 啟動服務端
 	if err := server.Start(); err != nil {
-		log.Fatalf("启动服务端失败: %v", err)
+		log.Fatalf("啟動服務端失敗: %v", err)
 	}
 
-	log.Printf("服务端启动成功，等待信号...")
-
-	// 模拟发布一些事件
+	// 設置 HTTP 服務器（可選）
 	go func() {
-		time.Sleep(5 * time.Second)
-		log.Printf("发布测试事件...")
-
-		// 发布用户加入事件
-		server.PublishEvent(ChatMessage{
-			UserID:    "user_001",
-			Message:   "用户加入聊天",
-			Timestamp: time.Now(),
-			Type:      "user_join",
+		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("Chat Server is running"))
 		})
 
-		// 发布消息事件
-		server.PublishEvent(ChatMessage{
-			UserID:    "user_001",
-			Message:   "Hello, everyone!",
-			Timestamp: time.Now(),
-			Type:      "message_sent",
-		})
+		port := "3200"
+		if envPort := os.Getenv("HTTP_PORT"); envPort != "" {
+			port = envPort
+		}
+
+		log.Printf("HTTP 服務器啟動在端口 %s", port)
+		if err := http.ListenAndServe(":"+port, nil); err != nil {
+			log.Printf("HTTP 服務器啟動失敗: %v", err)
+		}
 	}()
 
-	// 等待中断信号
+	// 等待中斷信號
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
 
-	log.Printf("收到停止信号，正在关闭服务端...")
-	// 优雅关闭
+	<-sigChan
+	log.Printf("收到中斷信號，正在關閉...")
+
+	// 優雅關閉
 	server.Stop()
+	log.Printf("Chat Server 已關閉")
 }
