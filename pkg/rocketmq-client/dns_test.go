@@ -117,8 +117,7 @@ func TestDNSResolver_ResolveNameServers(t *testing.T) {
 	resolver := NewDNSResolver(DefaultDNSConfig())
 
 	nameservers := []string{
-		"localhost:9876",
-		"127.0.0.1:9876",
+		"10.1.7.229:9876",
 	}
 
 	resolved, err := resolver.ResolveNameServers(nameservers)

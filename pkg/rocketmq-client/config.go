@@ -2,6 +2,7 @@ package rocketmqclient
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"strings"
 	"sync"
@@ -157,6 +158,7 @@ func DefaultTimeoutConfig() *TimeoutConfig {
 // DefaultDNSConfig 回傳預設 DNS 配置
 func DefaultDNSConfig() *DNSConfig {
 	return &DNSConfig{
+
 		UseFQDN:         true, // K8s 環境建議使用 FQDN
 		ResolveTimeout:  5 * time.Second,
 		RefreshInterval: 30 * time.Second,
@@ -271,6 +273,7 @@ func (r *DNSResolver) ResolveWithRetry(nameserver string) (string, error) {
 
 // ResolveNameServers 解析多個 nameserver 地址
 func (r *DNSResolver) ResolveNameServers(nameservers []string) ([]string, error) {
+	log.Println("ResolveNameServers", nameservers)
 	if len(nameservers) == 0 {
 		return nil, fmt.Errorf("nameserver 列表不能為空")
 	}

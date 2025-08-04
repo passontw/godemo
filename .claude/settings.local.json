@@ -20,7 +20,11 @@
       "Bash(go build:*)",
       "Bash(docker run:*)",
       "Bash(kubectl rollout restart:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(go run:*)",
+      "Bash(pkill:*)",
+      "Bash(go get:*)",
+      "Bash(mkdir:*)"
     ],
     "deny": []
   }
