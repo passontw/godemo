@@ -11,10 +11,11 @@ import (
 	"syscall"
 	"time"
 
+	messagemanager "godemo/message_manager"
+
 	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
-	"github.com/apache/rocketmq-client-go/v2/producer"
 	"github.com/gorilla/websocket"
 )
 
@@ -44,6 +45,7 @@ type WSMessage struct {
 type ChatClient struct {
 	producer   rocketmq.Producer
 	consumer   rocketmq.PushConsumer
+	manager    *messagemanager.MessageManager
 	nameserver string
 	groupName  string
 	userID     string
@@ -54,9 +56,12 @@ type ChatClient struct {
 
 // 创建新的客户端
 func NewChatClient(nameserver, groupName, userID string) *ChatClient {
+	nameservers := []string{nameserver}
+	manager := messagemanager.NewMessageManager(nameservers, groupName+"_producer")
 	return &ChatClient{
 		nameserver: nameserver,
 		groupName:  groupName,
+		manager:    manager,
 		userID:     userID,
 		responses:  make(map[string]chan ChatResponse),
 		upgrader: websocket.Upgrader{
@@ -70,19 +75,23 @@ func NewChatClient(nameserver, groupName, userID string) *ChatClient {
 // 启动客户端
 func (c *ChatClient) Start() error {
 	// 创建生产者
-	p, err := rocketmq.NewProducer(
-		producer.WithNameServer([]string{c.nameserver}),
-		producer.WithGroupName(c.groupName+"_producer"),
-	)
-	if err != nil {
-		return fmt.Errorf("创建生产者失败: %v", err)
-	}
-	c.producer = p
+	// manager := messagemanager.NewMessageManager([]string{c.nameserver}, c.groupName+"_producer")
+
+	// log.Printf("manager: %v", manager)
+
+	// p, err := rocketmq.NewProducer(
+	// 	producer.WithNameServer([]string{c.nameserver}),
+	// 	producer.WithGroupName(c.groupName+"_producer"),
+	// )
+	// if err != nil {
+	// 	return fmt.Errorf("创建生产者失败: %v", err)
+	// }
+	// c.producer = p
 
 	// 启动生产者
-	if err := c.producer.Start(); err != nil {
-		return fmt.Errorf("启动生产者失败: %v", err)
-	}
+	// if err := c.producer.Start(); err != nil {
+	// 	return fmt.Errorf("启动生产者失败: %v", err)
+	// }
 
 	// 创建消费者
 	consumerInstance, err := rocketmq.NewPushConsumer(
@@ -144,6 +153,7 @@ func (c *ChatClient) handleResponse(ctx context.Context, msgs ...*primitive.Mess
 // 发送请求
 func (c *ChatClient) SendRequest(action string, data interface{}) (*ChatResponse, error) {
 	requestID := fmt.Sprintf("req_%d", time.Now().UnixNano())
+	log.Printf("requestID: %s", requestID)
 
 	request := ChatRequest{
 		RequestID: requestID,
@@ -166,16 +176,23 @@ func (c *ChatClient) SendRequest(action string, data interface{}) (*ChatResponse
 	msg.WithProperty("user_id", c.userID)
 	msg.WithProperty("action", action)
 
-	// 创建响应通道
+	// // 创建响应通道
 	responseCh := make(chan ChatResponse, 1)
 	c.responses[requestID] = responseCh
 
 	// 发送消息
-	result, err := c.producer.SendSync(context.Background(), msg)
+	producer := c.manager.GetReqResProducer()
+	result, err := producer.SendSync(context.Background(), msg)
 	if err != nil {
 		delete(c.responses, requestID)
 		return nil, fmt.Errorf("发送请求失败: %v", err)
 	}
+
+	// result, err := c.producer.SendSync(context.Background(), msg)
+	// if err != nil {
+	// 	delete(c.responses, requestID)
+	// 	return nil, fmt.Errorf("发送请求失败: %v", err)
+	// }
 
 	log.Printf("请求已发送: %s", result.String())
 
