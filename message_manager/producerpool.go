@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/GUAIK-ORG/go-snowflake/snowflake"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
@@ -45,9 +47,23 @@ func NewProducerPool(poolConfig *ProducerPoolConfig) *ProducerPool {
 			log.Printf("Failed to create producer: %v", err)
 		}
 	}
+
+	// 初始化雪花演算法
+	rand.Seed(time.Now().UnixNano())
+	datacenterId := rand.Int63n(32) // 0-31 範圍
+	workerId := rand.Int63n(32)     // 0-31 範圍
+
+	sf, err := snowflake.NewSnowflake(datacenterId, workerId)
+	if err != nil {
+		log.Printf("Failed to create snowflake: %v", err)
+		// 如果雪花演算法初始化失敗，使用預設值
+		sf, _ = snowflake.NewSnowflake(0, 0)
+	}
+
 	return &ProducerPool{
 		producers: producers,
 		config:    poolConfig,
+		snowflake: sf,
 	}
 }
 
@@ -62,6 +78,11 @@ func (p *ProducerPool) ShutdownAll() {
 }
 
 func (p *ProducerPool) SendRequest(ctx context.Context, topic string, payload interface{}) (*ResponseData, error) {
+	// 檢查 snowflake 是否為 nil
+	if p.snowflake == nil {
+		return nil, fmt.Errorf("snowflake is not initialized")
+	}
+
 	requestId := fmt.Sprintf("%d", p.snowflake.NextVal())
 	traceId := fmt.Sprintf("%d", p.snowflake.NextVal())
 
