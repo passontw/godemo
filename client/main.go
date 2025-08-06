@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -19,12 +18,12 @@ import (
 )
 
 // 消息结构
-type ChatRequest struct {
-	RequestID string      `json:"request_id"`
-	UserID    string      `json:"user_id"`
-	Action    string      `json:"action"`
-	Data      interface{} `json:"data"`
-}
+// type ChatRequest struct {
+// 	RequestID string      `json:"request_id"`
+// 	UserID    string      `json:"user_id"`
+// 	Action    string      `json:"action"`
+// 	Data      interface{} `json:"data"`
+// }
 
 type ChatResponse struct {
 	RequestID string      `json:"request_id"`
@@ -70,24 +69,6 @@ func NewChatClient(nameserver, groupName, userID string) *ChatClient {
 // 启动客户端
 func (c *ChatClient) Start() error {
 	nameservers := []string{c.nameserver}
-	// manager := messagemanager.NewMessageManager([]string{c.nameserver}, c.groupName+"_producer")
-
-	// log.Printf("manager: %v", manager)
-
-	// p, err := rocketmq.NewProducer(
-	// 	producer.WithNameServer([]string{c.nameserver}),
-	// 	producer.WithGroupName(c.groupName+"_producer"),
-	// )
-	// if err != nil {
-	// 	return fmt.Errorf("创建生产者失败: %v", err)
-	// }
-	// c.producer = p
-
-	// 启动生产者
-	// if err := c.producer.Start(); err != nil {
-	// 	return fmt.Errorf("启动生产者失败: %v", err)
-	// }
-
 	consumerConfig := messagemanager.ConsumerConfig{
 		Nameservers:  nameservers,
 		GroupName:    c.groupName + "_consumer",
@@ -157,55 +138,55 @@ func (c *ChatClient) handleResponse(ctx context.Context, msgs ...*primitive.Mess
 	return consumer.ConsumeSuccess, nil
 }
 
-// 发送请求
-func (c *ChatClient) SendRequest(action string, data interface{}) (*ChatResponse, error) {
-	requestID := fmt.Sprintf("req_%d", time.Now().UnixNano())
-	log.Printf("requestID: %s", requestID)
+// // 发送请求
+// func (c *ChatClient) SendRequest(action string, data interface{}) (*ChatResponse, error) {
+// 	requestID := fmt.Sprintf("req_%d", time.Now().UnixNano())
+// 	log.Printf("requestID: %s", requestID)
 
-	request := ChatRequest{
-		RequestID: requestID,
-		UserID:    c.userID,
-		Action:    action,
-		Data:      data,
-	}
+// 	request := ChatRequest{
+// 		RequestID: requestID,
+// 		UserID:    c.userID,
+// 		Action:    action,
+// 		Data:      data,
+// 	}
 
-	requestData, err := json.Marshal(request)
-	if err != nil {
-		return nil, fmt.Errorf("序列化请求失败: %v", err)
-	}
+// 	requestData, err := json.Marshal(request)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("序列化请求失败: %v", err)
+// 	}
 
-	msg := &primitive.Message{
-		Topic: "TG001-chat-service-requests",
-		Body:  requestData,
-	}
+// 	msg := &primitive.Message{
+// 		Topic: "TG001-chat-service-requests",
+// 		Body:  requestData,
+// 	}
 
-	msg.WithProperty("request_id", requestID)
-	msg.WithProperty("user_id", c.userID)
-	msg.WithProperty("action", action)
+// 	msg.WithProperty("request_id", requestID)
+// 	msg.WithProperty("user_id", c.userID)
+// 	msg.WithProperty("action", action)
 
-	// // 创建响应通道
-	responseCh := make(chan ChatResponse, 1)
-	c.responses[requestID] = responseCh
+// 	// // 创建响应通道
+// 	responseCh := make(chan ChatResponse, 1)
+// 	c.responses[requestID] = responseCh
 
-	// 发送消息
-	producer := c.manager.GetReqResProducer()
-	result, err := producer.SendSync(context.Background(), msg)
-	if err != nil {
-		delete(c.responses, requestID)
-		return nil, fmt.Errorf("发送请求失败: %v", err)
-	}
+// 	// 发送消息
+// 	producer := c.manager.GetReqResProducer()
+// 	result, err := producer.SendSync(context.Background(), msg)
+// 	if err != nil {
+// 		delete(c.responses, requestID)
+// 		return nil, fmt.Errorf("发送请求失败: %v", err)
+// 	}
 
-	log.Printf("请求已发送: %s", result.String())
+// 	log.Printf("请求已发送: %s", result.String())
 
-	// 等待响应
-	select {
-	case response := <-responseCh:
-		return &response, nil
-	case <-time.After(10 * time.Second):
-		delete(c.responses, requestID)
-		return nil, fmt.Errorf("等待响应超时")
-	}
-}
+// 	// 等待响应
+// 	select {
+// 	case response := <-responseCh:
+// 		return &response, nil
+// 	case <-time.After(10 * time.Second):
+// 		delete(c.responses, requestID)
+// 		return nil, fmt.Errorf("等待响应超时")
+// 	}
+// }
 
 // WebSocket 处理函数
 func (c *ChatClient) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -231,7 +212,7 @@ func (c *ChatClient) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		log.Printf("收到 WebSocket 消息: %+v", wsMsg)
 
 		// 发送到 RocketMQ
-		response, err := c.SendRequest("send_message", map[string]interface{}{
+		response, err := c.manager.ReqresProducers.SendRequest(context.Background(), "TG001-chat-service-requests", map[string]interface{}{
 			"message": wsMsg.Message,
 		})
 		if err != nil {

@@ -1,9 +1,9 @@
 package messagemanager
 
 type MessageManager struct {
-	consumerPool    *ConsumerPool
-	reqresProducers *ProducerPool
-	pubsubProducers *ProducerPool
+	ConsumerPool    *ConsumerPool
+	ReqresProducers *ProducerPool
+	PubsubProducers *ProducerPool
 }
 
 func NewMessageManager(consumerPoolConfig *ConsumerPoolConfig, reqresProducerConfig *ProducerPoolConfig, pubsubProducerConfig *ProducerPoolConfig) *MessageManager {
@@ -15,27 +15,27 @@ func NewMessageManager(consumerPoolConfig *ConsumerPoolConfig, reqresProducerCon
 	}
 
 	return &MessageManager{
-		consumerPool:    consumerPool,
-		reqresProducers: reqresProducers,
-		pubsubProducers: pubsubProducers,
+		ConsumerPool:    consumerPool,
+		ReqresProducers: reqresProducers,
+		PubsubProducers: pubsubProducers,
 	}
 }
 
 func (m *MessageManager) GetReqResProducer() *PooledProducer {
-	return m.reqresProducers.producers[0]
+	return m.ReqresProducers.producers[0]
 }
 
 func (m *MessageManager) GetPubSubProducer() *PooledProducer {
-	if m.pubsubProducers == nil {
+	if m.PubsubProducers == nil {
 		return nil
 	}
-	return m.pubsubProducers.producers[0]
+	return m.PubsubProducers.producers[0]
 }
 
 func (m *MessageManager) ShutdownAll() {
-	m.consumerPool.ShutdownAll()
-	m.reqresProducers.ShutdownAll()
-	if m.pubsubProducers != nil {
-		m.pubsubProducers.ShutdownAll()
+	m.ConsumerPool.ShutdownAll()
+	m.ReqresProducers.ShutdownAll()
+	if m.PubsubProducers != nil {
+		m.PubsubProducers.ShutdownAll()
 	}
 }

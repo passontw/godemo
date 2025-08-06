@@ -3,8 +3,11 @@ package messagemanager
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"sync"
+	"time"
 
+	"github.com/GUAIK-ORG/go-snowflake/snowflake"
 	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
 	"github.com/apache/rocketmq-client-go/v2/producer"
@@ -15,6 +18,14 @@ type PooledProducer struct {
 	producer  rocketmq.Producer
 	groupName string
 	mu        sync.RWMutex
+	snowflake *snowflake.Snowflake
+}
+
+// 消息结构
+type RequestData struct {
+	RequestID string      `json:"request_id"`
+	TraceID   string      `json:"trace_id"`
+	Data      interface{} `json:"data"`
 }
 
 func NewPooledProducer(nameservers []string, groupName string) (*PooledProducer, error) {
@@ -31,9 +42,19 @@ func NewPooledProducer(nameservers []string, groupName string) (*PooledProducer,
 		return nil, fmt.Errorf("failed to start producer: %v", err)
 	}
 
+	// 使用亂數初始化雪花演算法的 datacenterId 和 workerId
+	rand.Seed(time.Now().UnixNano())
+	datacenterId := rand.Int63n(32) // 0-31 範圍
+	workerId := rand.Int63n(32)     // 0-31 範圍
+
+	sf, err := snowflake.NewSnowflake(datacenterId, workerId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create snowflake: %v", err)
+	}
 	return &PooledProducer{
 		producer:  producer,
 		groupName: groupName,
+		snowflake: sf,
 	}, nil
 }
 
