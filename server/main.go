@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
-	"github.com/apache/rocketmq-client-go/v2/producer"
+
+	messagemanager "godemo/message_manager"
 )
 
 // 消息结构
@@ -40,8 +40,7 @@ type ChatResponse struct {
 
 // 服务端结构
 type ChatServer struct {
-	producer   rocketmq.Producer
-	consumer   rocketmq.PushConsumer
+	manager    *messagemanager.MessageManager
 	nameserver string
 	groupName  string
 }
@@ -56,49 +55,87 @@ func NewChatServer(nameserver, groupName string) *ChatServer {
 
 func (s *ChatServer) Start() error {
 	log.Printf("開始啟動服務端...")
-
-	// 创建生产者 - 啟用生產者
-	log.Printf("創建生產者...")
-	p, err := rocketmq.NewProducer(
-		producer.WithNameServer([]string{s.nameserver}),
-		producer.WithGroupName(s.groupName+"_producer"),
-	)
-	if err != nil {
-		return fmt.Errorf("创建生产者失败: %v", err)
+	nameservers := []string{s.nameserver}
+	consumerConfig := messagemanager.ConsumerConfig{
+		Nameservers:  nameservers,
+		GroupName:    s.groupName + "_consumer",
+		Topic:        "TG001-chat-service-requests",
+		MessageModel: consumer.Clustering,
+		MessageSelector: consumer.MessageSelector{
+			Type:       consumer.TAG,
+			Expression: "*",
+		},
+		Handler: s.handleRequest,
 	}
-	s.producer = p
+	messageManager := messagemanager.NewMessageManager(
+		&messagemanager.ConsumerPoolConfig{
+			ConsumerConfigs: []messagemanager.ConsumerConfig{consumerConfig},
+			Nameservers:     nameservers,
+			Logger:          log.Default(),
+		},
+		&messagemanager.ProducerPoolConfig{
+			Nameservers: nameservers,
+			GroupName:   s.groupName + "_producer",
+			Prefix:      "reqres",
+			PoolSize:    1,
+			Logger:      log.Default(),
+		},
+		nil,
+	)
+	s.manager = messageManager
+	
+	// 创建生产者 - 啟用生產者
+	// log.Printf("創建生產者...")
+	// producerConfig := producer.ProducerConfig{
+	// 	Nameservers: []string{s.nameserver},
+	// 	GroupName:   s.groupName + "_producer",
+	// }
+	// producerPool := messagemanager.NewProducerPool(&messagemanager.ProducerPoolConfig{
+	// 	ProducerConfigs: []messagemanager.ProducerConfig{producerConfig},
+	// })
+
+	// producerPool.StartAll()
+
+	// p, err := rocketmq.NewProducer(
+	// 	producer.WithNameServer([]string{s.nameserver}),
+	// 	producer.WithGroupName(s.groupName+"_producer"),
+	// )
+	// if err != nil {
+	// 	return fmt.Errorf("创建生产者失败: %v", err)
+	// }
+	// s.producer = p
 
 	// 启动生产者
-	log.Printf("啟動生產者...")
-	if err := s.producer.Start(); err != nil {
-		return fmt.Errorf("启动生产者失败: %v", err)
-	}
-	log.Printf("生產者啟動成功")
+	// log.Printf("啟動生產者...")
+	// if err := s.producer.Start(); err != nil {
+	// 	return fmt.Errorf("启动生产者失败: %v", err)
+	// }
+	// log.Printf("生產者啟動成功")
 
 	// 创建消费者
-	log.Printf("創建消費者...")
-	c, err := rocketmq.NewPushConsumer(
-		consumer.WithNameServer([]string{s.nameserver}),
-		consumer.WithGroupName(s.groupName+"_consumer"),
-	)
-	if err != nil {
-		return fmt.Errorf("创建消费者失败: %v", err)
-	}
-	s.consumer = c
+	// log.Printf("創建消費者...")
+	// c, err := rocketmq.NewPushConsumer(
+	// 	consumer.WithNameServer([]string{s.nameserver}),
+	// 	consumer.WithGroupName(s.groupName+"_consumer"),
+	// )
+	// if err != nil {
+	// 	return fmt.Errorf("创建消费者失败: %v", err)
+	// }
+	// s.consumer = c
 
-	// 订阅请求主题
-	log.Printf("訂閱主題: TG001-chat-service-requests")
-	if err := s.consumer.Subscribe("TG001-chat-service-requests", consumer.MessageSelector{}, s.handleRequest); err != nil {
-		return fmt.Errorf("订阅请求主题失败: %v", err)
-	}
-	log.Printf("主題訂閱成功")
+	// // 订阅请求主题
+	// log.Printf("訂閱主題: TG001-chat-service-requests")
+	// if err := s.consumer.Subscribe("TG001-chat-service-requests", consumer.MessageSelector{}, s.handleRequest); err != nil {
+	// 	return fmt.Errorf("订阅请求主题失败: %v", err)
+	// }
+	// log.Printf("主題訂閱成功")
 
-	// 启动消费者
-	log.Printf("啟動消費者...")
-	if err := s.consumer.Start(); err != nil {
-		return fmt.Errorf("启动消费者失败: %v", err)
-	}
-	log.Printf("消費者啟動成功")
+	// // 启动消费者
+	// log.Printf("啟動消費者...")
+	// if err := s.consumer.Start(); err != nil {
+	// 	return fmt.Errorf("启动消费者失败: %v", err)
+	// }
+	// log.Printf("消費者啟動成功")
 
 	log.Printf("聊天服务端已启动，监听请求...")
 	return nil
@@ -181,7 +218,7 @@ func (s *ChatServer) sendResponse(requestID string, response ChatResponse) error
 	msg.WithProperty("request_id", requestID)
 	msg.WithProperty("response_type", "chat_response")
 
-	result, err := s.producer.SendSync(context.Background(), msg)
+	result, err := s.manager.GetReqResProducer().SendSync(context.Background(), msg)
 	if err != nil {
 		return fmt.Errorf("发送响应失败: %v", err)
 	}
@@ -191,12 +228,7 @@ func (s *ChatServer) sendResponse(requestID string, response ChatResponse) error
 }
 
 func (s *ChatServer) Stop() {
-	if s.producer != nil {
-		s.producer.Shutdown()
-	}
-	if s.consumer != nil {
-		s.consumer.Shutdown()
-	}
+	s.manager.ShutdownAll()
 	log.Printf("聊天服务端已停止")
 }
 

@@ -40,3 +40,7 @@ func NewPooledProducer(nameservers []string, groupName string) (*PooledProducer,
 func (p *PooledProducer) SendSync(ctx context.Context, msg *primitive.Message) (*primitive.SendResult, error) {
 	return p.producer.SendSync(ctx, msg)
 }
+
+func (p *PooledProducer) Shutdown() error {
+	return p.producer.Shutdown()
+}

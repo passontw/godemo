@@ -13,7 +13,6 @@ import (
 
 	messagemanager "godemo/message_manager"
 
-	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
 	"github.com/gorilla/websocket"
@@ -43,8 +42,6 @@ type WSMessage struct {
 
 // 客户端结构
 type ChatClient struct {
-	producer   rocketmq.Producer
-	consumer   rocketmq.PushConsumer
 	manager    *messagemanager.MessageManager
 	nameserver string
 	groupName  string
@@ -56,12 +53,10 @@ type ChatClient struct {
 
 // 创建新的客户端
 func NewChatClient(nameserver, groupName, userID string) *ChatClient {
-	nameservers := []string{nameserver}
-	manager := messagemanager.NewMessageManager(nameservers, groupName+"_producer")
 	return &ChatClient{
 		nameserver: nameserver,
 		groupName:  groupName,
-		manager:    manager,
+		manager:    nil,
 		userID:     userID,
 		responses:  make(map[string]chan ChatResponse),
 		upgrader: websocket.Upgrader{
@@ -74,7 +69,7 @@ func NewChatClient(nameserver, groupName, userID string) *ChatClient {
 
 // 启动客户端
 func (c *ChatClient) Start() error {
-	// 创建生产者
+	nameservers := []string{c.nameserver}
 	// manager := messagemanager.NewMessageManager([]string{c.nameserver}, c.groupName+"_producer")
 
 	// log.Printf("manager: %v", manager)
@@ -93,25 +88,37 @@ func (c *ChatClient) Start() error {
 	// 	return fmt.Errorf("启动生产者失败: %v", err)
 	// }
 
-	// 创建消费者
-	consumerInstance, err := rocketmq.NewPushConsumer(
-		consumer.WithNameServer([]string{c.nameserver}),
-		consumer.WithGroupName(c.groupName+"_consumer"),
+	consumerConfig := messagemanager.ConsumerConfig{
+		Nameservers:  nameservers,
+		GroupName:    c.groupName + "_consumer",
+		Topic:        "TG001-websocket-service-responses",
+		MessageModel: consumer.Clustering,
+		MessageSelector: consumer.MessageSelector{
+			Type:       consumer.TAG,
+			Expression: "*",
+		},
+		ConsumerOrder:     true,
+		MaxReconsumeTimes: 3,
+		Handler:           c.handleResponse,
+	}
+
+	messageManager := messagemanager.NewMessageManager(
+		&messagemanager.ConsumerPoolConfig{
+			ConsumerConfigs: []messagemanager.ConsumerConfig{consumerConfig},
+			Nameservers:     nameservers,
+			Logger:          log.Default(),
+		},
+		&messagemanager.ProducerPoolConfig{
+			Nameservers: nameservers,
+			GroupName:   c.groupName + "_producer",
+			Prefix:      "reqres",
+			PoolSize:    1,
+			Logger:      log.Default(),
+		},
+		nil,
 	)
-	if err != nil {
-		return fmt.Errorf("创建消费者失败: %v", err)
-	}
-	c.consumer = consumerInstance
 
-	// 订阅响应主题 - 修正為正確的響應主題
-	if err := c.consumer.Subscribe("TG001-websocket-service-responses", consumer.MessageSelector{}, c.handleResponse); err != nil {
-		return fmt.Errorf("订阅响应主题失败: %v", err)
-	}
-
-	// 启动消费者
-	if err := c.consumer.Start(); err != nil {
-		return fmt.Errorf("启动消费者失败: %v", err)
-	}
+	c.manager = messageManager
 
 	// 设置 WebSocket 路由
 	http.HandleFunc("/ws", c.handleWebSocket)
@@ -188,12 +195,6 @@ func (c *ChatClient) SendRequest(action string, data interface{}) (*ChatResponse
 		return nil, fmt.Errorf("发送请求失败: %v", err)
 	}
 
-	// result, err := c.producer.SendSync(context.Background(), msg)
-	// if err != nil {
-	// 	delete(c.responses, requestID)
-	// 	return nil, fmt.Errorf("发送请求失败: %v", err)
-	// }
-
 	log.Printf("请求已发送: %s", result.String())
 
 	// 等待响应
@@ -256,12 +257,11 @@ func (c *ChatClient) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 // 停止客户端
 func (c *ChatClient) Stop() {
-	if c.producer != nil {
-		c.producer.Shutdown()
-	}
-	if c.consumer != nil {
-		c.consumer.Shutdown()
-	}
+	// if c.producer != nil {
+	// 	c.producer.Shutdown()
+	// }
+
+	c.manager.ShutdownAll()
 	if c.wsConn != nil {
 		c.wsConn.Close()
 	}
@@ -296,6 +296,8 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
 
+	client.manager.ShutdownAll()
 	log.Printf("收到停止信号，正在关闭客户端...")
+	time.Sleep(30 * time.Second)
 	client.Stop()
 }

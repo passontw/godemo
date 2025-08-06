@@ -8,10 +8,11 @@ import (
 
 // 生產者池配置
 type ProducerPoolConfig struct {
-	Nameserver []string
-	PoolSize   int
-	GroupName  string
-	Logger     *log.Logger
+	Nameservers []string
+	PoolSize    int
+	GroupName   string
+	Prefix      string
+	Logger      *log.Logger
 }
 
 // 生產者池
@@ -22,18 +23,28 @@ type ProducerPool struct {
 	isRunning bool
 }
 
-func NewProducerPool(nameservers []string, groupName string, prefix string, poolSize int) *ProducerPool {
-	producers := make([]*PooledProducer, poolSize)
+func NewProducerPool(poolConfig *ProducerPoolConfig) *ProducerPool {
+	producers := make([]*PooledProducer, poolConfig.PoolSize)
 	var err error
-	for i := 0; i < poolSize; i++ {
-		producerGroupName := fmt.Sprintf("%s-%s-%d", groupName, prefix, i)
-		producers[i], err = NewPooledProducer(nameservers, producerGroupName)
+	for i := 0; i < poolConfig.PoolSize; i++ {
+		producerGroupName := fmt.Sprintf("%s-%s-%d", poolConfig.GroupName, poolConfig.Prefix, i)
+		producers[i], err = NewPooledProducer(poolConfig.Nameservers, producerGroupName)
 		if err != nil {
 			log.Printf("Failed to create producer: %v", err)
 		}
 	}
 	return &ProducerPool{
 		producers: producers,
-		config:    &ProducerPoolConfig{Nameserver: nameservers, GroupName: groupName, PoolSize: poolSize},
+		config:    poolConfig,
+	}
+}
+
+func (p *ProducerPool) ShutdownAll() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, producer := range p.producers {
+		if producer != nil {
+			producer.Shutdown()
+		}
 	}
 }
