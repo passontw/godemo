@@ -26,6 +26,7 @@ type RequestData struct {
 	RequestID string      `json:"request_id"`
 	TraceID   string      `json:"trace_id"`
 	Data      interface{} `json:"data"`
+	Group     string      `json:"group"`
 }
 
 func NewPooledProducer(nameservers []string, groupName string) (*PooledProducer, error) {

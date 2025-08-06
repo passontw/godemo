@@ -10,10 +10,12 @@ import (
 	"syscall"
 	"time"
 
+	messagemanager "godemo/message_manager"
+	pb "godemo/message_manager/proto"
+
 	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
-
-	messagemanager "godemo/message_manager"
+	"google.golang.org/protobuf/proto"
 )
 
 // 消息结构
@@ -38,14 +40,12 @@ type ChatResponse struct {
 	Error     string      `json:"error,omitempty"`
 }
 
-// 服务端结构
 type ChatServer struct {
 	manager    *messagemanager.MessageManager
 	nameserver string
 	groupName  string
 }
 
-// 创建新的服务端
 func NewChatServer(nameserver, groupName string) *ChatServer {
 	return &ChatServer{
 		nameserver: nameserver,
@@ -54,7 +54,6 @@ func NewChatServer(nameserver, groupName string) *ChatServer {
 }
 
 func (s *ChatServer) Start() error {
-	log.Printf("開始啟動服務端...")
 	nameservers := []string{s.nameserver}
 	consumerConfig := messagemanager.ConsumerConfig{
 		Nameservers:  nameservers,
@@ -65,8 +64,11 @@ func (s *ChatServer) Start() error {
 			Type:       consumer.TAG,
 			Expression: "*",
 		},
-		Handler: s.handleRequest,
+		ConsumerOrder:     true,
+		MaxReconsumeTimes: 3,
+		Handler:           s.handleRequest,
 	}
+
 	messageManager := messagemanager.NewMessageManager(
 		&messagemanager.ConsumerPoolConfig{
 			ConsumerConfigs: []messagemanager.ConsumerConfig{consumerConfig},
@@ -82,6 +84,7 @@ func (s *ChatServer) Start() error {
 		},
 		nil,
 	)
+
 	s.manager = messageManager
 
 	log.Printf("聊天服务端已启动，监听请求...")
@@ -92,16 +95,42 @@ func (s *ChatServer) handleRequest(ctx context.Context, msgs ...*primitive.Messa
 	for _, msg := range msgs {
 		log.Printf("收到请求消息: %s", string(msg.Body))
 
-		var request ChatRequest
-		if err := json.Unmarshal(msg.Body, &request); err != nil {
-			log.Printf("解析请求失败: %v", err)
+		// 印出訊息的 properties
+		log.Printf("=== 訊息 Properties ===")
+		log.Printf("request_id: %s", msg.GetProperty("request_id"))
+		log.Printf("trace_id: %s", msg.GetProperty("trace_id"))
+		log.Printf("source_service: %s", msg.GetProperty("source_service"))
+		log.Printf("target_service: %s", msg.GetProperty("target_service"))
+		log.Printf("======================")
+
+		// 使用 protobuf 反序列化
+		var requestData pb.RequestData
+		if err := proto.Unmarshal(msg.Body, &requestData); err != nil {
+			log.Printf("解析 protobuf 请求失败: %v", err)
 			continue
 		}
 
-		// 印出訊息內容
+		// 印出 protobuf 訊息內容
+		log.Printf("=== Protobuf 訊息內容 ===")
+		log.Printf("RequestID: %s", requestData.RequestId)
+		log.Printf("TraceID: %s", requestData.TraceId)
+		log.Printf("Data: %s", requestData.Data)
+		log.Printf("SourceService: %s", requestData.SourceService)
+		log.Printf("TargetService: %s", requestData.TargetService)
+		log.Printf("=========================")
+
+		// 轉換為 ChatRequest 結構
+		request := ChatRequest{
+			RequestID: requestData.RequestId,
+			TraceID:   requestData.TraceId,
+			Data:      requestData.Data, // 直接使用字串，不需要轉換
+		}
+
+		// 印出處理後的訊息內容
 		log.Printf("=== 處理訊息 ===")
 		log.Printf("RequestID: %s", request.RequestID)
-		log.Printf("Data: %+v", request.Data)
+		log.Printf("TraceID: %s", request.TraceID)
+		log.Printf("Data: %s", request.Data)
 		log.Printf("=================")
 
 		// 等待一秒
@@ -125,38 +154,13 @@ func (s *ChatServer) processRequest(request ChatRequest) ChatResponse {
 		TraceID:   request.TraceID,
 		Success:   true,
 	}
-	var messageData map[string]interface{}
-	if data, ok := request.Data.(map[string]interface{}); ok {
-		messageData = data
-	}
 
 	response.Data = map[string]interface{}{
 		"request_id": request.RequestID,
 		"trace_id":   request.TraceID,
-		"message":    messageData["message"],
+		"message":    request.Data,
 	}
 	log.Printf("消息已发送: %s", response.Data)
-
-	// switch request.Action {
-	// case "send_message":
-	// 	// 提取訊息內容
-	// 	var messageData map[string]interface{}
-	// 	if data, ok := request.Data.(map[string]interface{}); ok {
-	// 		messageData = data
-	// 	}
-
-	// 	response.Data = map[string]interface{}{
-	// 		"message_id": fmt.Sprintf("msg_%d", time.Now().Unix()),
-	// 		"status":     "sent",
-	// 		"message":    messageData["message"],
-	// 		"user_id":    request.UserID,
-	// 	}
-	// 	log.Printf("消息已发送: %s", response.Data)
-
-	// default:
-	// 	response.Success = false
-	// 	response.Error = "未知的操作类型"
-	// }
 
 	return response
 }
@@ -190,7 +194,7 @@ func (s *ChatServer) Stop() {
 }
 
 func main() {
-	log.Printf("服务端启动中...")
+	log.Printf("聊天服务端启动中...")
 
 	environment := os.Getenv("ROCKETMQ_ENVIRONMENT")
 	if environment == "" {
@@ -201,7 +205,7 @@ func main() {
 	log.Printf("使用 nameserver: %s", nameserver)
 
 	// 使用指定的消費者組名稱
-	groupName := "chat-req-group"
+	groupName := "chat-service-uniqueid"
 	log.Printf("使用 group name: %s", groupName)
 
 	server := NewChatServer(nameserver, groupName)
@@ -210,12 +214,13 @@ func main() {
 		log.Fatalf("启动服务端失败: %v", err)
 	}
 
-	log.Printf("服务端启动成功，等待信号...")
+	log.Printf("聊天服务端已启动")
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
 
-	log.Printf("收到停止信号，正在关闭服务端...")
 	server.Stop()
+	log.Printf("收到停止信号，正在关闭服务端...")
+	time.Sleep(30 * time.Second)
 }

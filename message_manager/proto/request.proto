@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package messagemanager;
+
+option go_package = "godemo/message_manager/proto";
+
+// 請求資料結構
+message RequestData {
+  string request_id = 1;
+  string trace_id = 2;
+  string data = 3;  // 改為 string 類型，更容易處理
+  string source_service = 4;
+  string target_service = 5;
+}
+
+// 響應資料結構
+message ResponseData {
+  string request_id = 1;
+  string trace_id = 2;
+  string data = 3;
+  bool success = 4;
+  string error = 5;
+}
+
+// 通用訊息結構
+message MessageData {
+  string request_id = 1;
+  string trace_id = 2;
+  string source_service = 3;
+  string target_service = 4;
+  string payload = 5;
+} 

@@ -162,9 +162,16 @@ func (c *ChatClient) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		log.Printf("收到 WebSocket 消息: %+v", wsMsg)
 
 		// 发送到 RocketMQ
-		response, err := c.manager.ReqresProducers.SendRequest(context.Background(), "TG001-chat-service-requests", map[string]interface{}{
+		options := messagemanager.SendRequestOptions{
+			SourceService: "websocket-service",
+			TargetService: "chat-service",
+			Topic:         "TG001-chat-service-requests",
+			GroupName:     "chat-req-group_consumer",
+		}
+		payload := map[string]interface{}{
 			"message": wsMsg.Message,
-		})
+		}
+		response, err := c.manager.ReqresProducers.SendRequest(context.Background(), options, payload)
 		if err != nil {
 			log.Printf("发送请求失败: %v", err)
 			// 发送错误响应到前端

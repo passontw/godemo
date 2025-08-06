@@ -2,16 +2,25 @@ package messagemanager
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
 	"sync"
 	"time"
 
+	pb "godemo/message_manager/proto"
+
 	"github.com/GUAIK-ORG/go-snowflake/snowflake"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
+	"google.golang.org/protobuf/proto"
 )
+
+type SendRequestOptions struct {
+	SourceService string
+	TargetService string
+	Topic         string
+	GroupName     string
+}
 
 // 生產者池配置
 type ProducerPoolConfig struct {
@@ -77,7 +86,7 @@ func (p *ProducerPool) ShutdownAll() {
 	}
 }
 
-func (p *ProducerPool) SendRequest(ctx context.Context, topic string, payload interface{}) (*ResponseData, error) {
+func (p *ProducerPool) SendRequest(ctx context.Context, options SendRequestOptions, payload interface{}) (*ResponseData, error) {
 	// 檢查 snowflake 是否為 nil
 	if p.snowflake == nil {
 		return nil, fmt.Errorf("snowflake is not initialized")
@@ -86,23 +95,35 @@ func (p *ProducerPool) SendRequest(ctx context.Context, topic string, payload in
 	requestId := fmt.Sprintf("%d", p.snowflake.NextVal())
 	traceId := fmt.Sprintf("%d", p.snowflake.NextVal())
 
-	requestData := RequestData{
-		RequestID: requestId,
-		TraceID:   traceId,
-		Data:      payload,
+	// 將 payload 轉為字串
+	var payloadStr string
+	if payload != nil {
+		payloadStr = fmt.Sprintf("%v", payload)
 	}
 
-	requestBody, err := json.Marshal(requestData)
+	// 建立 protobuf 訊息
+	requestData := &pb.RequestData{
+		RequestId:     requestId,
+		TraceId:       traceId,
+		Data:          payloadStr,
+		SourceService: options.SourceService,
+		TargetService: options.TargetService,
+	}
+
+	// 序列化為 protobuf
+	requestBody, err := proto.Marshal(requestData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request data: %v", err)
+		return nil, fmt.Errorf("failed to marshal protobuf request data: %v", err)
 	}
 
 	msg := &primitive.Message{
-		Topic: topic,
+		Topic: options.Topic,
 		Body:  requestBody,
 	}
 	msg.WithProperty("request_id", requestId)
 	msg.WithProperty("trace_id", traceId)
+	msg.WithProperty("source_service", options.SourceService)
+	msg.WithProperty("target_service", options.TargetService)
 
 	producer := p.producers[0]
 
