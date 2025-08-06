@@ -26,13 +26,13 @@ type ChatMessage struct {
 
 type ChatRequest struct {
 	RequestID string      `json:"request_id"`
-	UserID    string      `json:"user_id"`
-	Action    string      `json:"action"` // "send_message", "get_history"
+	TraceID   string      `json:"trace_id"`
 	Data      interface{} `json:"data"`
 }
 
 type ChatResponse struct {
 	RequestID string      `json:"request_id"`
+	TraceID   string      `json:"trace_id"`
 	Success   bool        `json:"success"`
 	Data      interface{} `json:"data"`
 	Error     string      `json:"error,omitempty"`
@@ -83,59 +83,6 @@ func (s *ChatServer) Start() error {
 		nil,
 	)
 	s.manager = messageManager
-	
-	// 创建生产者 - 啟用生產者
-	// log.Printf("創建生產者...")
-	// producerConfig := producer.ProducerConfig{
-	// 	Nameservers: []string{s.nameserver},
-	// 	GroupName:   s.groupName + "_producer",
-	// }
-	// producerPool := messagemanager.NewProducerPool(&messagemanager.ProducerPoolConfig{
-	// 	ProducerConfigs: []messagemanager.ProducerConfig{producerConfig},
-	// })
-
-	// producerPool.StartAll()
-
-	// p, err := rocketmq.NewProducer(
-	// 	producer.WithNameServer([]string{s.nameserver}),
-	// 	producer.WithGroupName(s.groupName+"_producer"),
-	// )
-	// if err != nil {
-	// 	return fmt.Errorf("创建生产者失败: %v", err)
-	// }
-	// s.producer = p
-
-	// 启动生产者
-	// log.Printf("啟動生產者...")
-	// if err := s.producer.Start(); err != nil {
-	// 	return fmt.Errorf("启动生产者失败: %v", err)
-	// }
-	// log.Printf("生產者啟動成功")
-
-	// 创建消费者
-	// log.Printf("創建消費者...")
-	// c, err := rocketmq.NewPushConsumer(
-	// 	consumer.WithNameServer([]string{s.nameserver}),
-	// 	consumer.WithGroupName(s.groupName+"_consumer"),
-	// )
-	// if err != nil {
-	// 	return fmt.Errorf("创建消费者失败: %v", err)
-	// }
-	// s.consumer = c
-
-	// // 订阅请求主题
-	// log.Printf("訂閱主題: TG001-chat-service-requests")
-	// if err := s.consumer.Subscribe("TG001-chat-service-requests", consumer.MessageSelector{}, s.handleRequest); err != nil {
-	// 	return fmt.Errorf("订阅请求主题失败: %v", err)
-	// }
-	// log.Printf("主題訂閱成功")
-
-	// // 启动消费者
-	// log.Printf("啟動消費者...")
-	// if err := s.consumer.Start(); err != nil {
-	// 	return fmt.Errorf("启动消费者失败: %v", err)
-	// }
-	// log.Printf("消費者啟動成功")
 
 	log.Printf("聊天服务端已启动，监听请求...")
 	return nil
@@ -154,8 +101,6 @@ func (s *ChatServer) handleRequest(ctx context.Context, msgs ...*primitive.Messa
 		// 印出訊息內容
 		log.Printf("=== 處理訊息 ===")
 		log.Printf("RequestID: %s", request.RequestID)
-		log.Printf("UserID: %s", request.UserID)
-		log.Printf("Action: %s", request.Action)
 		log.Printf("Data: %+v", request.Data)
 		log.Printf("=================")
 
@@ -173,33 +118,45 @@ func (s *ChatServer) handleRequest(ctx context.Context, msgs ...*primitive.Messa
 }
 
 func (s *ChatServer) processRequest(request ChatRequest) ChatResponse {
-	log.Printf("处理请求: %s, 用户: %s, 动作: %s", request.RequestID, request.UserID, request.Action)
+	log.Printf("处理请求: %s, TraceID: %s, 数据: %s", request.RequestID, request.TraceID, request.Data)
 
 	response := ChatResponse{
 		RequestID: request.RequestID,
+		TraceID:   request.TraceID,
 		Success:   true,
 	}
-
-	switch request.Action {
-	case "send_message":
-		// 提取訊息內容
-		var messageData map[string]interface{}
-		if data, ok := request.Data.(map[string]interface{}); ok {
-			messageData = data
-		}
-
-		response.Data = map[string]interface{}{
-			"message_id": fmt.Sprintf("msg_%d", time.Now().Unix()),
-			"status":     "sent",
-			"message":    messageData["message"],
-			"user_id":    request.UserID,
-		}
-		log.Printf("消息已发送: %s", response.Data)
-
-	default:
-		response.Success = false
-		response.Error = "未知的操作类型"
+	var messageData map[string]interface{}
+	if data, ok := request.Data.(map[string]interface{}); ok {
+		messageData = data
 	}
+
+	response.Data = map[string]interface{}{
+		"request_id": request.RequestID,
+		"trace_id":   request.TraceID,
+		"message":    messageData["message"],
+	}
+	log.Printf("消息已发送: %s", response.Data)
+
+	// switch request.Action {
+	// case "send_message":
+	// 	// 提取訊息內容
+	// 	var messageData map[string]interface{}
+	// 	if data, ok := request.Data.(map[string]interface{}); ok {
+	// 		messageData = data
+	// 	}
+
+	// 	response.Data = map[string]interface{}{
+	// 		"message_id": fmt.Sprintf("msg_%d", time.Now().Unix()),
+	// 		"status":     "sent",
+	// 		"message":    messageData["message"],
+	// 		"user_id":    request.UserID,
+	// 	}
+	// 	log.Printf("消息已发送: %s", response.Data)
+
+	// default:
+	// 	response.Success = false
+	// 	response.Error = "未知的操作类型"
+	// }
 
 	return response
 }

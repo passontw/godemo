@@ -138,56 +138,6 @@ func (c *ChatClient) handleResponse(ctx context.Context, msgs ...*primitive.Mess
 	return consumer.ConsumeSuccess, nil
 }
 
-// // 发送请求
-// func (c *ChatClient) SendRequest(action string, data interface{}) (*ChatResponse, error) {
-// 	requestID := fmt.Sprintf("req_%d", time.Now().UnixNano())
-// 	log.Printf("requestID: %s", requestID)
-
-// 	request := ChatRequest{
-// 		RequestID: requestID,
-// 		UserID:    c.userID,
-// 		Action:    action,
-// 		Data:      data,
-// 	}
-
-// 	requestData, err := json.Marshal(request)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("序列化请求失败: %v", err)
-// 	}
-
-// 	msg := &primitive.Message{
-// 		Topic: "TG001-chat-service-requests",
-// 		Body:  requestData,
-// 	}
-
-// 	msg.WithProperty("request_id", requestID)
-// 	msg.WithProperty("user_id", c.userID)
-// 	msg.WithProperty("action", action)
-
-// 	// // 创建响应通道
-// 	responseCh := make(chan ChatResponse, 1)
-// 	c.responses[requestID] = responseCh
-
-// 	// 发送消息
-// 	producer := c.manager.GetReqResProducer()
-// 	result, err := producer.SendSync(context.Background(), msg)
-// 	if err != nil {
-// 		delete(c.responses, requestID)
-// 		return nil, fmt.Errorf("发送请求失败: %v", err)
-// 	}
-
-// 	log.Printf("请求已发送: %s", result.String())
-
-// 	// 等待响应
-// 	select {
-// 	case response := <-responseCh:
-// 		return &response, nil
-// 	case <-time.After(10 * time.Second):
-// 		delete(c.responses, requestID)
-// 		return nil, fmt.Errorf("等待响应超时")
-// 	}
-// }
-
 // WebSocket 处理函数
 func (c *ChatClient) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := c.upgrader.Upgrade(w, r, nil)
