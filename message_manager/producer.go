@@ -3,6 +3,7 @@ package messagemanager
 import (
 	"context"
 	"fmt"
+	"log"
 	"math/rand"
 	"sync"
 	"time"
@@ -60,6 +61,9 @@ func NewPooledProducer(nameservers []string, groupName string) (*PooledProducer,
 }
 
 func (p *PooledProducer) SendSync(ctx context.Context, msg *primitive.Message) (*primitive.SendResult, error) {
+	result, _ := p.producer.SendSync(ctx, msg)
+
+	log.Printf("send request result: %v", result)
 	return p.producer.SendSync(ctx, msg)
 }
 

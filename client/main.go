@@ -32,6 +32,21 @@ type ChatResponse struct {
 	Error     string      `json:"error,omitempty"`
 }
 
+// 錯誤響應結構
+type ErrorResponse struct {
+	RequestID    string                 `json:"request_id"`
+	TraceID      string                 `json:"trace_id"`
+	Success      bool                   `json:"success"`
+	ErrorCode    string                 `json:"error_code"`
+	ErrorMessage string                 `json:"error_message"`
+	ErrorType    string                 `json:"error_type"`
+	Details      map[string]interface{} `json:"details,omitempty"`
+	Retryable    bool                   `json:"retryable"`
+	HTTPStatus   int                    `json:"http_status,omitempty"`
+	Timestamp    time.Time              `json:"timestamp"`
+	ServiceName  string                 `json:"service_name"`
+}
+
 // WebSocket 消息结构
 type WSMessage struct {
 	Type    string      `json:"type"`
@@ -121,6 +136,21 @@ func (c *ChatClient) handleResponse(ctx context.Context, msgs ...*primitive.Mess
 	for _, msg := range msgs {
 		log.Printf("收到响应消息: %s", string(msg.Body))
 
+		// 檢查是否為錯誤響應
+		responseType := msg.GetProperty("response_type")
+		if responseType == "error_response" {
+			var errorResponse ErrorResponse
+			if err := json.Unmarshal(msg.Body, &errorResponse); err != nil {
+				log.Printf("解析錯誤響應失敗: %v", err)
+				continue
+			}
+
+			// 處理錯誤響應
+			c.handleErrorResponse(errorResponse)
+			continue
+		}
+
+		// 處理正常響應
 		var response ChatResponse
 		if err := json.Unmarshal(msg.Body, &response); err != nil {
 			log.Printf("解析响应失败: %v", err)
@@ -136,6 +166,27 @@ func (c *ChatClient) handleResponse(ctx context.Context, msgs ...*primitive.Mess
 		}
 	}
 	return consumer.ConsumeSuccess, nil
+}
+
+// 處理錯誤響應
+func (c *ChatClient) handleErrorResponse(errorResponse ErrorResponse) {
+	log.Printf("收到錯誤響應: %s - %s", errorResponse.ErrorCode, errorResponse.ErrorMessage)
+
+	// 根據錯誤類型決定是否重試
+	if errorResponse.Retryable {
+		log.Printf("錯誤可重試，準備重試...")
+		// 實作重試邏輯
+	}
+
+	// 通知 WebSocket 客戶端
+	if c.wsConn != nil {
+		errorMsg := WSMessage{
+			Type:    "error",
+			Message: errorResponse.ErrorMessage,
+			Data:    errorResponse,
+		}
+		c.wsConn.WriteJSON(errorMsg)
+	}
 }
 
 // WebSocket 处理函数
@@ -172,6 +223,7 @@ func (c *ChatClient) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			"message": wsMsg.Message,
 		}
 		response, err := c.manager.ReqresProducers.SendRequest(context.Background(), options, payload)
+		log.Printf("response: %v", response)
 		if err != nil {
 			log.Printf("发送请求失败: %v", err)
 			// 发送错误响应到前端
@@ -236,6 +288,6 @@ func main() {
 
 	client.manager.ShutdownAll()
 	log.Printf("收到停止信号，正在关闭客户端...")
-	time.Sleep(30 * time.Second)
+	time.Sleep(10 * time.Second)
 	client.Stop()
 }

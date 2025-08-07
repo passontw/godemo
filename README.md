@@ -33,7 +33,61 @@ godemo/
 go mod tidy
 ```
 
-### 2. 運行示例
+### 2. 生成 Protobuf 檔案
+
+#### 安裝 protoc 編譯器
+```bash
+# macOS
+brew install protobuf
+
+# Ubuntu/Debian
+sudo apt-get install protobuf-compiler
+
+# CentOS/RHEL
+sudo yum install protobuf-compiler
+
+# 或者從官方下載
+# https://github.com/protocolbuffers/protobuf/releases
+```
+
+#### 安裝 Go protobuf 插件
+```bash
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+```
+
+#### 生成 pb.go 檔案
+```bash
+# 進入 proto 目錄
+cd message_manager/proto
+
+# 生成 pb.go 檔案
+protoc --go_out=. --go_opt=paths=source_relative request.proto
+
+# 或者使用完整路徑
+protoc --go_out=. --go_opt=paths=source_relative \
+  --proto_path=. \
+  request.proto
+```
+
+#### 自動化腳本（可選）
+```bash
+# 創建生成腳本
+cat > generate-proto.sh << 'EOF'
+#!/bin/bash
+cd message_manager/proto
+protoc --go_out=. --go_opt=paths=source_relative request.proto
+echo "Protobuf 檔案生成完成"
+EOF
+
+# 設置執行權限
+chmod +x generate-proto.sh
+
+# 執行生成
+./generate-proto.sh
+```
+
+### 3. 運行示例
 
 #### 方法一：使用啟動腳本
 ```bash

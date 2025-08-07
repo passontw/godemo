@@ -128,6 +128,8 @@ func (p *ProducerPool) SendRequest(ctx context.Context, options SendRequestOptio
 	producer := p.producers[0]
 
 	result, err := producer.SendSync(ctx, msg)
+	log.Printf("send request result: %v", result)
+	log.Printf("send request error: %v", err)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %v", err)
 	}
