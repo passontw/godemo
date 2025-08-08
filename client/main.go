@@ -11,6 +11,7 @@ import (
 	"time"
 
 	messagemanager "godemo/message_manager"
+	"godemo/message_manager/rocketmq-iclient/consumermanager"
 
 	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
@@ -69,8 +70,8 @@ func NewChatClient(nameserver, groupName, userID string) *ChatClient {
 // 启动客户端
 func (c *ChatClient) Start() error {
 	nameservers := []string{c.nameserver}
-	consumerConfig := messagemanager.ConsumerConfig{
-		Nameservers:  nameservers,
+	consumerConfig := consumermanager.ConsumerConfig{
+		NameServers:  nameservers,
 		GroupName:    c.groupName + "_consumer",
 		Topic:        "TG001-websocket-service-responses",
 		MessageModel: consumer.Clustering,
@@ -78,14 +79,17 @@ func (c *ChatClient) Start() error {
 			Type:       consumer.TAG,
 			Expression: "*",
 		},
-		ConsumerOrder:     true,
+		ConsumerType:      consumermanager.ConsumerType_PushConsumer,
+		ConsumeFromWhere:  consumer.ConsumeFromFirstOffset,
+		ConsumeTimeout:    3 * time.Second,
+		ConsumeOrderly:    true,
 		MaxReconsumeTimes: 3,
 		Handler:           c.handleResponse,
 	}
 
 	messageManager := messagemanager.NewMessageManager(
 		&messagemanager.ConsumerPoolConfig{
-			ConsumerConfigs: []messagemanager.ConsumerConfig{consumerConfig},
+			ConsumerConfigs: []consumermanager.ConsumerConfig{consumerConfig},
 			Nameservers:     nameservers,
 			Logger:          log.Default(),
 		},

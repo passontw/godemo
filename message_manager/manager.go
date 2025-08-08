@@ -1,5 +1,7 @@
 package messagemanager
 
+import "godemo/message_manager/rocketmq-iclient/producermanager"
+
 type MessageManager struct {
 	ConsumerPool    *ConsumerPool
 	ReqresProducers *ProducerPool
@@ -21,11 +23,11 @@ func NewMessageManager(consumerPoolConfig *ConsumerPoolConfig, reqresProducerCon
 	}
 }
 
-func (m *MessageManager) GetReqResProducer() *PooledProducer {
+func (m *MessageManager) GetReqResProducer() producermanager.IProducer {
 	return m.ReqresProducers.producers[0]
 }
 
-func (m *MessageManager) GetPubSubProducer() *PooledProducer {
+func (m *MessageManager) GetPubSubProducer() producermanager.IProducer {
 	if m.PubsubProducers == nil {
 		return nil
 	}

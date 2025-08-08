@@ -9,6 +9,7 @@ import (
 	"time"
 
 	pb "godemo/message_manager/proto"
+	"godemo/message_manager/rocketmq-iclient/producermanager"
 
 	"github.com/GUAIK-ORG/go-snowflake/snowflake"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
@@ -33,7 +34,7 @@ type ProducerPoolConfig struct {
 
 // 生產者池
 type ProducerPool struct {
-	producers []*PooledProducer
+	producers []producermanager.IProducer
 	config    *ProducerPoolConfig
 	mu        sync.RWMutex
 	isRunning bool
@@ -47,11 +48,19 @@ type ResponseData struct {
 }
 
 func NewProducerPool(poolConfig *ProducerPoolConfig) *ProducerPool {
-	producers := make([]*PooledProducer, poolConfig.PoolSize)
+	producers := make([]producermanager.IProducer, poolConfig.PoolSize)
 	var err error
 	for i := 0; i < poolConfig.PoolSize; i++ {
 		producerGroupName := fmt.Sprintf("%s-%s-%d", poolConfig.GroupName, poolConfig.Prefix, i)
-		producers[i], err = NewPooledProducer(poolConfig.Nameservers, producerGroupName)
+		producers[i], err = producermanager.NewProducerManager(
+			&producermanager.ProducerConfig{
+				NameServers:                poolConfig.Nameservers,
+				GroupName:                  producerGroupName,
+				SendMsgTimeout:             3 * time.Second,
+				RetryTimesWhenSendFailed:   2,
+				CompressMsgBodyOverHowmuch: 4096,
+			},
+		)
 		if err != nil {
 			log.Printf("Failed to create producer: %v", err)
 		}
@@ -127,7 +136,7 @@ func (p *ProducerPool) SendRequest(ctx context.Context, options SendRequestOptio
 
 	producer := p.producers[0]
 
-	result, err := producer.SendSync(ctx, msg)
+	result, err := producer.SendSyncMessage(ctx, msg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %v", err)
 	}

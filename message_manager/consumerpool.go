@@ -2,36 +2,35 @@ package messagemanager
 
 import (
 	"fmt"
+	"godemo/message_manager/rocketmq-iclient/consumermanager"
 	"log"
 )
 
 type ConsumerPoolConfig struct {
-	ConsumerConfigs []ConsumerConfig
+	ConsumerConfigs []consumermanager.ConsumerConfig
 	Nameservers     []string
 	Logger          *log.Logger
 }
 
 type ConsumerPool struct {
-	consumers []*SingleConsumer
+	consumers []consumermanager.IPushConsumer
 	config    *ConsumerPoolConfig
 }
 
 func NewConsumerPool(poolConfig *ConsumerPoolConfig) *ConsumerPool {
-	consumers := make([]*SingleConsumer, len(poolConfig.ConsumerConfigs))
+	consumers := make([]consumermanager.IPushConsumer, len(poolConfig.ConsumerConfigs))
 
 	for i, config := range poolConfig.ConsumerConfigs {
-		consumer, err := NewSingleConsumer(&ConsumerConfig{
-			Nameservers:  config.Nameservers,
-			GroupName:    config.GroupName,
-			Topic:        config.Topic,
-			MessageModel: config.MessageModel,
-		})
+		consumer, err := consumermanager.NewPushConsumerManager(config)
 		if err != nil {
 			log.Printf("failed to create consumer: %v", err)
 			continue
 		}
 
-		consumer.Subscribe(config.Topic, config.MessageSelector, config.Handler)
+		consumer.SubscribeFunc(&consumermanager.SubscriptionInfo{
+			Topic:    config.Topic,
+			Selector: config.MessageSelector,
+		}, config.Handler)
 		consumer.Start()
 
 		consumers[i] = consumer

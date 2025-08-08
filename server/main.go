@@ -12,6 +12,7 @@ import (
 
 	messagemanager "godemo/message_manager"
 	pb "godemo/message_manager/proto"
+	"godemo/message_manager/rocketmq-iclient/consumermanager"
 
 	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
@@ -55,8 +56,8 @@ func NewChatServer(nameserver, groupName string) *ChatServer {
 
 func (s *ChatServer) Start() error {
 	nameservers := []string{s.nameserver}
-	consumerConfig := messagemanager.ConsumerConfig{
-		Nameservers:  nameservers,
+	consumerConfig := consumermanager.ConsumerConfig{
+		NameServers:  nameservers,
 		GroupName:    s.groupName + "_consumer",
 		Topic:        "TG001-chat-service-requests",
 		MessageModel: consumer.Clustering,
@@ -64,14 +65,17 @@ func (s *ChatServer) Start() error {
 			Type:       consumer.TAG,
 			Expression: "*",
 		},
-		ConsumerOrder:     true,
+		ConsumerType:      consumermanager.ConsumerType_PushConsumer,
+		ConsumeFromWhere:  consumer.ConsumeFromFirstOffset,
+		ConsumeTimeout:    3 * time.Second,
+		ConsumeOrderly:    true,
 		MaxReconsumeTimes: 3,
 		Handler:           s.handleRequest,
 	}
 
 	messageManager := messagemanager.NewMessageManager(
 		&messagemanager.ConsumerPoolConfig{
-			ConsumerConfigs: []messagemanager.ConsumerConfig{consumerConfig},
+			ConsumerConfigs: []consumermanager.ConsumerConfig{consumerConfig},
 			Nameservers:     nameservers,
 			Logger:          log.Default(),
 		},
@@ -179,7 +183,7 @@ func (s *ChatServer) sendResponse(requestID string, response ChatResponse) error
 	msg.WithProperty("request_id", requestID)
 	msg.WithProperty("response_type", "chat_response")
 
-	result, err := s.manager.GetReqResProducer().SendSync(context.Background(), msg)
+	result, err := s.manager.GetReqResProducer().SendSyncMessage(context.Background(), msg)
 	if err != nil {
 		return fmt.Errorf("发送响应失败: %v", err)
 	}
