@@ -14,6 +14,8 @@ import (
 	"github.com/apache/rocketmq-client-go/v2/producer"
 )
 
+type RequestCallback func(ctx context.Context, msg *primitive.Message, err error)
+
 // 池化生產者
 type PooledProducer struct {
 	producer  rocketmq.Producer
@@ -22,8 +24,8 @@ type PooledProducer struct {
 	snowflake *snowflake.Snowflake
 }
 
-// 消息结构
-type RequestData struct {
+// 消息结构 - 這個結構已被 protobuf RequestData 取代，保留用於兼容性
+type LegacyRequestData struct {
 	RequestID string      `json:"request_id"`
 	TraceID   string      `json:"trace_id"`
 	Data      interface{} `json:"data"`
@@ -58,6 +60,18 @@ func NewPooledProducer(nameservers []string, groupName string) (*PooledProducer,
 		groupName: groupName,
 		snowflake: sf,
 	}, nil
+}
+
+func (p *PooledProducer) SendRequest(ctx context.Context, ttl time.Duration, msg *primitive.Message) (*primitive.Message, error) {
+	return p.producer.Request(ctx, ttl, msg)
+}
+
+func (p *PooledProducer) SendRequestAsync(ctx context.Context, ttl time.Duration, callback RequestCallback, msg *primitive.Message) error {
+	// 使用類型轉換將我們的 RequestCallback 轉換為 internal.RequestCallback
+	internalCallback := func(ctx context.Context, msg *primitive.Message, err error) {
+		callback(ctx, msg, err)
+	}
+	return p.producer.RequestAsync(ctx, ttl, internalCallback, msg)
 }
 
 func (p *PooledProducer) SendSync(ctx context.Context, msg *primitive.Message) (*primitive.SendResult, error) {

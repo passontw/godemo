@@ -432,6 +432,13 @@ func (s *ChatServer) handleRequest(ctx context.Context, msgs ...*primitive.Messa
 		var requestData pb.RequestData
 		if err := proto.Unmarshal(msg.Body, &requestData); err != nil {
 			log.Printf("解析 protobuf 请求失败: %v", err)
+			// 從訊息 properties 中獲取 request_id
+			requestID := msg.GetProperty("request_id")
+			if requestID == "" {
+				requestID = "unknown"
+			}
+			// 發送錯誤回應
+			s.sendErrorResponse(requestID, ErrMessageParseFailed, "解析請求失敗")
 			continue
 		}
 
@@ -458,12 +465,14 @@ func (s *ChatServer) handleRequest(ctx context.Context, msgs ...*primitive.Messa
 		log.Printf("Data: %s", request.Data)
 		log.Printf("=================")
 
-		// 等待一秒
+		// 等待一秒模擬處理時間
 		log.Printf("等待一秒...")
 		time.Sleep(1 * time.Second)
-
+		log.Printf("工作完成...")
+		// 處理請求並生成回應
 		response := s.processRequest(request)
 
+		// 發送回應
 		if err := s.sendResponse(request.RequestID, response); err != nil {
 			log.Printf("发送响应失败: %v", err)
 			// 使用新的錯誤響應機制
@@ -493,20 +502,36 @@ func (s *ChatServer) processRequest(request ChatRequest) ChatResponse {
 }
 
 func (s *ChatServer) sendResponse(requestID string, response interface{}) error {
-	responseData, err := json.Marshal(response)
+	// 將響應轉換為 JSON 字符串
+	responseJSON, err := json.Marshal(response)
 	if err != nil {
-		return fmt.Errorf("序列化响应失败: %v", err)
+		return fmt.Errorf("序列化響應失败: %v", err)
+	}
+
+	// 使用 protobuf SuccessResponse 結構
+	successResponse := &pb.SuccessResponse{
+		BaseResponse: &pb.BaseResponse{
+			RequestId:     requestID,
+			SourceService: "chat-service",
+			TargetService: "websocket-service",
+		},
+		Data: string(responseJSON), // 將 JSON 作為字符串存儲
+	}
+
+	// 序列化 protobuf
+	responseData, err := proto.Marshal(successResponse)
+	if err != nil {
+		return fmt.Errorf("序列化 protobuf 響應失敗: %v", err)
 	}
 
 	msg := &primitive.Message{
-		Topic: "INVALID_TOPIC_FOR_TESTING", // 使用無效的 Topic 來觸發真實的 RocketMQ 錯誤
+		Topic: "TG001-websocket-service-responses", // 發送到 client 監聽的 topic
 		Body:  responseData,
 	}
 
 	msg.WithProperty("request_id", requestID)
-	msg.WithProperty("response_type", "chat_response")
+	msg.WithProperty("response_type", "success_response")
 
-	// 這會觸發真實的 RocketMQ 錯誤
 	result, err := s.manager.GetReqResProducer().SendSync(context.Background(), msg)
 	if err != nil {
 		return fmt.Errorf("发送响应失败: %v", err)
@@ -518,11 +543,19 @@ func (s *ChatServer) sendResponse(requestID string, response interface{}) error 
 
 // 發送錯誤響應
 func (s *ChatServer) sendErrorResponse(requestID, errorCode, message string) error {
-	errorResponse := NewErrorResponse(requestID, "", errorCode, message)
+	// 使用 protobuf ErrorResponse 結構
+	errorResponse := &pb.ErrorResponse{
+		BaseResponse: &pb.BaseResponse{
+			RequestId:     requestID,
+			SourceService: "chat-service",
+			TargetService: "websocket-service",
+		},
+		Errorcode: fmt.Sprintf("%s: %s", errorCode, message),
+	}
 
-	errorData, err := json.Marshal(errorResponse)
+	errorData, err := proto.Marshal(errorResponse)
 	if err != nil {
-		log.Printf("序列化错误响应失败: %v", err)
+		log.Printf("序列化 protobuf 錯誤響應失敗: %v", err)
 		return err
 	}
 
@@ -579,5 +612,4 @@ func main() {
 
 	server.Stop()
 	log.Printf("收到停止信号，正在关闭服务端...")
-	time.Sleep(10 * time.Second)
 }

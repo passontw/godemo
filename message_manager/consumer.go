@@ -40,6 +40,11 @@ func NewSingleConsumer(config *ConsumerConfig) (*SingleConsumer, error) {
 		return nil, fmt.Errorf("failed to create consumer: %v", err)
 	}
 
+	// 立即訂閱 topic
+	if err := consumer.Subscribe(config.Topic, config.MessageSelector, config.Handler); err != nil {
+		return nil, fmt.Errorf("failed to subscribe topic %s: %v", config.Topic, err)
+	}
+
 	return &SingleConsumer{
 		topic:     config.Topic,
 		groupName: config.GroupName,

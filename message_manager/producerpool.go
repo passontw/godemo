@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+type AsyncRequestCallback func(ctx context.Context, msg *primitive.Message, err error)
 type SendRequestOptions struct {
 	SourceService string
 	TargetService string
@@ -84,6 +85,55 @@ func (p *ProducerPool) ShutdownAll() {
 			producer.Shutdown()
 		}
 	}
+}
+
+func (p *ProducerPool) SendRequestAsync(ctx context.Context, options SendRequestOptions, payload interface{}, callback AsyncRequestCallback) {
+	// 檢查 snowflake 是否為 nil
+	if p.snowflake == nil {
+		log.Printf("snowflake is not initialized")
+		return
+	}
+
+	requestId := fmt.Sprintf("%d", p.snowflake.NextVal())
+	traceId := fmt.Sprintf("%d", p.snowflake.NextVal())
+
+	// 將 payload 轉為字串
+	var payloadStr string
+	if payload != nil {
+		payloadStr = fmt.Sprintf("%v", payload)
+	}
+
+	// 建立 protobuf 訊息
+	requestData := &pb.RequestData{
+		RequestId:     requestId,
+		TraceId:       traceId,
+		Data:          payloadStr,
+		SourceService: options.SourceService,
+		TargetService: options.TargetService,
+	}
+
+	// 序列化為 protobuf
+	requestBody, err := proto.Marshal(requestData)
+	if err != nil {
+		log.Printf("failed to marshal protobuf request data: %v", err)
+		return
+	}
+
+	msg := &primitive.Message{
+		Topic: options.Topic,
+		Body:  requestBody,
+	}
+	msg.WithProperty("request_id", requestId)
+	msg.WithProperty("trace_id", traceId)
+	msg.WithProperty("source_service", options.SourceService)
+	msg.WithProperty("target_service", options.TargetService)
+
+	producer := p.producers[0]
+
+	producer.SendRequestAsync(ctx, 10*time.Second, func(ctx context.Context, msg *primitive.Message, err error) {
+		log.Printf("SendRequestAsync callback send request result: %v", msg)
+		callback(ctx, msg, err)
+	}, msg)
 }
 
 func (p *ProducerPool) SendRequest(ctx context.Context, options SendRequestOptions, payload interface{}) (*ResponseData, error) {

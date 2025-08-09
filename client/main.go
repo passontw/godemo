@@ -11,10 +11,12 @@ import (
 	"time"
 
 	messagemanager "godemo/message_manager"
+	pb "godemo/message_manager/proto"
 
 	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
 	"github.com/gorilla/websocket"
+	"google.golang.org/protobuf/proto"
 )
 
 // 消息结构
@@ -139,10 +141,24 @@ func (c *ChatClient) handleResponse(ctx context.Context, msgs ...*primitive.Mess
 		// 檢查是否為錯誤響應
 		responseType := msg.GetProperty("response_type")
 		if responseType == "error_response" {
-			var errorResponse ErrorResponse
-			if err := json.Unmarshal(msg.Body, &errorResponse); err != nil {
-				log.Printf("解析錯誤響應失敗: %v", err)
+			// 使用 protobuf 解析錯誤響應
+			var pbErrorResponse pb.ErrorResponse
+			if err := proto.Unmarshal(msg.Body, &pbErrorResponse); err != nil {
+				log.Printf("解析 protobuf 錯誤響應失敗: %v", err)
 				continue
+			}
+
+			// 轉換為 ErrorResponse 結構
+			errorResponse := ErrorResponse{
+				RequestID:    pbErrorResponse.BaseResponse.RequestId,
+				TraceID:      pbErrorResponse.BaseResponse.TraceId,
+				Success:      false,
+				ErrorCode:    pbErrorResponse.Errorcode,
+				ErrorMessage: pbErrorResponse.Errorcode,
+				ErrorType:    "PROTOBUF_ERROR",
+				Retryable:    false,
+				Timestamp:    time.Now(),
+				ServiceName:  "client",
 			}
 
 			// 處理錯誤響應
@@ -150,11 +166,31 @@ func (c *ChatClient) handleResponse(ctx context.Context, msgs ...*primitive.Mess
 			continue
 		}
 
-		// 處理正常響應
-		var response ChatResponse
-		if err := json.Unmarshal(msg.Body, &response); err != nil {
-			log.Printf("解析响应失败: %v", err)
+		// 處理正常響應 - 使用 protobuf 解析
+		var pbSuccessResponse pb.SuccessResponse
+		if err := proto.Unmarshal(msg.Body, &pbSuccessResponse); err != nil {
+			log.Printf("解析 protobuf 響應失敗: %v", err)
 			continue
+		}
+
+		log.Printf("解析成功的 protobuf 響應:")
+		log.Printf("RequestID: %s", pbSuccessResponse.BaseResponse.RequestId)
+		log.Printf("TraceID: %s", pbSuccessResponse.BaseResponse.TraceId)
+		log.Printf("Data: %s", pbSuccessResponse.Data)
+
+		// 解析 Data 字段中的 JSON
+		var responseData interface{}
+		if err := json.Unmarshal([]byte(pbSuccessResponse.Data), &responseData); err != nil {
+			log.Printf("解析響應數據失敗: %v", err)
+			// 如果解析失敗，直接使用字符串
+			responseData = pbSuccessResponse.Data
+		}
+
+		// 構建 ChatResponse
+		response := ChatResponse{
+			RequestID: pbSuccessResponse.BaseResponse.RequestId,
+			Success:   true,
+			Data:      responseData,
 		}
 
 		// 检查是否有对应的请求等待响应
@@ -288,6 +324,5 @@ func main() {
 
 	client.manager.ShutdownAll()
 	log.Printf("收到停止信号，正在关闭客户端...")
-	time.Sleep(10 * time.Second)
 	client.Stop()
 }
