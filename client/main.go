@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -58,13 +59,14 @@ type WSMessage struct {
 
 // 客户端结构
 type ChatClient struct {
-	manager    *messagemanager.MessageManager
-	nameserver string
-	groupName  string
-	userID     string
-	responses  map[string]chan ChatResponse
-	wsConn     *websocket.Conn
-	upgrader   websocket.Upgrader
+	manager     *messagemanager.MessageManager
+	nameserver  string
+	groupName   string
+	userID      string
+	responses   map[string]chan ChatResponse
+	responsesMu sync.RWMutex // 保護 responses map 的線程安全
+	wsConn      *websocket.Conn
+	upgrader    websocket.Upgrader
 }
 
 // 创建新的客户端
@@ -193,12 +195,22 @@ func (c *ChatClient) handleResponse(ctx context.Context, msgs ...*primitive.Mess
 			Data:      responseData,
 		}
 
-		// 检查是否有对应的请求等待响应
+		// 线程安全地检查是否有对应的请求等待响应
+		c.responsesMu.Lock()
 		if ch, exists := c.responses[response.RequestID]; exists {
-			ch <- response
 			delete(c.responses, response.RequestID)
+			c.responsesMu.Unlock()
+
+			// 發送響應到 channel
+			select {
+			case ch <- response:
+				log.Printf("成功發送響應到等待的請求: %s", response.RequestID)
+			default:
+				log.Printf("響應 channel 已滿或已關閉: %s", response.RequestID)
+			}
 		} else {
-			log.Printf("未找到对应的请求: %s", response.RequestID)
+			c.responsesMu.Unlock()
+			log.Printf("未找到对应的请求: %s (可能是重複響應)", response.RequestID)
 		}
 	}
 	return consumer.ConsumeSuccess, nil
@@ -258,8 +270,8 @@ func (c *ChatClient) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		payload := map[string]interface{}{
 			"message": wsMsg.Message,
 		}
-		response, err := c.manager.ReqresProducers.SendRequest(context.Background(), options, payload)
-		log.Printf("response: %v", response)
+		sendResponse, err := c.manager.ReqresProducers.SendRequest(context.Background(), options, payload)
+		log.Printf("send response: %v", sendResponse)
 		if err != nil {
 			log.Printf("发送请求失败: %v", err)
 			// 发送错误响应到前端
@@ -271,13 +283,48 @@ func (c *ChatClient) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// 发送成功响应到前端
-		successMsg := WSMessage{
-			Type:    "response",
-			Message: "消息已发送",
-			Data:    response,
+		// 創建響應 channel 並線程安全地添加到 map
+		responseChan := make(chan ChatResponse, 1)
+		c.responsesMu.Lock()
+		c.responses[sendResponse.RequestID] = responseChan
+		c.responsesMu.Unlock()
+
+		log.Printf("等待業務響應，RequestID: %s", sendResponse.RequestID)
+
+		// 設置超時等待業務響應
+		go func(requestID string, responseChannel chan ChatResponse, connection *websocket.Conn) {
+			select {
+			case businessResponse := <-responseChannel:
+				log.Printf("收到業務響應: %+v", businessResponse)
+				// 发送業務响应到前端
+				successMsg := WSMessage{
+					Type:    "response",
+					Message: "處理完成",
+					Data:    businessResponse,
+				}
+				connection.WriteJSON(successMsg)
+			case <-time.After(30 * time.Second): // 30秒超時
+				log.Printf("等待響應超時，RequestID: %s", requestID)
+				// 線程安全地清理 map
+				c.responsesMu.Lock()
+				delete(c.responses, requestID)
+				c.responsesMu.Unlock()
+				// 发送超時錯誤到前端
+				timeoutMsg := WSMessage{
+					Type:    "error",
+					Message: "處理超時",
+				}
+				connection.WriteJSON(timeoutMsg)
+			}
+		}(sendResponse.RequestID, responseChan, conn)
+
+		// 立即發送確認消息到前端
+		ackMsg := WSMessage{
+			Type:    "ack",
+			Message: "消息已接收，正在處理...",
+			Data:    map[string]string{"request_id": sendResponse.RequestID},
 		}
-		conn.WriteJSON(successMsg)
+		conn.WriteJSON(ackMsg)
 	}
 }
 

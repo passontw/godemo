@@ -184,8 +184,6 @@ func (p *ProducerPool) SendRequest(ctx context.Context, options SendRequestOptio
 		return nil, fmt.Errorf("failed to send request: %v", err)
 	}
 
-	log.Printf("send request result: %v", result)
-
 	responseData := &ResponseData{
 		RequestID: requestId,
 		TraceID:   traceId,

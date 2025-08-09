@@ -75,10 +75,11 @@ func (p *PooledProducer) SendRequestAsync(ctx context.Context, ttl time.Duration
 }
 
 func (p *PooledProducer) SendSync(ctx context.Context, msg *primitive.Message) (*primitive.SendResult, error) {
-	result, _ := p.producer.SendSync(ctx, msg)
+	result, err := p.producer.SendSync(ctx, msg)
 
 	log.Printf("send request result: %v", result)
-	return p.producer.SendSync(ctx, msg)
+	log.Printf("send request error: %v", err)
+	return result, err
 }
 
 func (p *PooledProducer) Shutdown() error {

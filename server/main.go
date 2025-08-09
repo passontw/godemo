@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -366,15 +367,18 @@ type ChatResponse struct {
 }
 
 type ChatServer struct {
-	manager    *messagemanager.MessageManager
-	nameserver string
-	groupName  string
+	manager         *messagemanager.MessageManager
+	nameserver      string
+	groupName       string
+	processedReqs   map[string]bool // 記錄已處理的請求ID
+	processedReqsMu sync.RWMutex    // 保護 processedReqs 的線程安全
 }
 
 func NewChatServer(nameserver, groupName string) *ChatServer {
 	return &ChatServer{
-		nameserver: nameserver,
-		groupName:  groupName,
+		nameserver:    nameserver,
+		groupName:     groupName,
+		processedReqs: make(map[string]bool),
 	}
 }
 
@@ -412,8 +416,26 @@ func (s *ChatServer) Start() error {
 
 	s.manager = messageManager
 
+	// 啟動定期清理 goroutine
+	go s.startCleanupRoutine()
+
 	log.Printf("聊天服务端已启动，监听请求...")
 	return nil
+}
+
+// 定期清理已處理的請求記錄，防止記憶體洩漏
+func (s *ChatServer) startCleanupRoutine() {
+	ticker := time.NewTicker(10 * time.Minute) // 每10分鐘清理一次
+	defer ticker.Stop()
+
+	for range ticker.C {
+		s.processedReqsMu.Lock()
+		// 清空所有記錄（簡單策略）
+		// 實際生產環境可以考慮記錄時間戳，只清理舊記錄
+		s.processedReqs = make(map[string]bool)
+		log.Printf("已清理處理記錄，防止記憶體洩漏")
+		s.processedReqsMu.Unlock()
+	}
 }
 
 func (s *ChatServer) handleRequest(ctx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
@@ -457,6 +479,17 @@ func (s *ChatServer) handleRequest(ctx context.Context, msgs ...*primitive.Messa
 			TraceID:   requestData.TraceId,
 			Data:      requestData.Data, // 直接使用字串，不需要轉換
 		}
+
+		// 檢查是否已經處理過此請求（防重複處理）
+		s.processedReqsMu.Lock()
+		if s.processedReqs[request.RequestID] {
+			s.processedReqsMu.Unlock()
+			log.Printf("請求 %s 已經處理過，跳過重複處理", request.RequestID)
+			continue
+		}
+		// 標記為正在處理
+		s.processedReqs[request.RequestID] = true
+		s.processedReqsMu.Unlock()
 
 		// 印出處理後的訊息內容
 		log.Printf("=== 處理訊息 ===")
